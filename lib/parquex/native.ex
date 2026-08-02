@@ -36,4 +36,12 @@ defmodule Parquex.Native do
   def reader_next(_reader), do: :erlang.nif_error(:nif_not_loaded)
   def reader_close(_reader), do: :erlang.nif_error(:nif_not_loaded)
   def reader_stats(_reader), do: :erlang.nif_error(:nif_not_loaded)
+
+  def parquet_writer_open(_path, _allowed_root, _schema, _options, _owner),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def parquet_writer_write(_writer, _batch), do: :erlang.nif_error(:nif_not_loaded)
+  def parquet_writer_close(_writer), do: :erlang.nif_error(:nif_not_loaded)
+  def parquet_writer_abort(_writer), do: :erlang.nif_error(:nif_not_loaded)
+  def parquet_writer_stats(_writer), do: :erlang.nif_error(:nif_not_loaded)
 end

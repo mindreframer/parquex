@@ -316,6 +316,22 @@ impl StagedWrite for LocalWriter {
     }
 }
 
+impl Write for LocalWriter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        StagedWrite::write(self, buffer)
+            .map_err(|_| std::io::Error::other("staged object write failed"))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.ensure_open(Operation::WriterWrite)
+            .map_err(|_| std::io::Error::other("staged object write failed"))?;
+        self.file
+            .as_mut()
+            .ok_or_else(|| std::io::Error::other("staged object writer is closed"))?
+            .flush()
+    }
+}
+
 impl Drop for LocalWriter {
     fn drop(&mut self) {
         if self.active {

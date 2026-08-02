@@ -2,13 +2,13 @@
 
 ## Progress
 
-- [ ] Phase 4.1: Define schema-validated bounded-batch write contracts.
-- [ ] Phase 4.2: Implement incremental native writing with row-group/page limits.
-- [ ] Phase 4.3: Publish staged local output create-only after successful writer close.
-- [ ] Phase 4.4: Add supported compression codecs and a tested default.
-- [ ] Phase 4.5: Add bounded backpressure, cancellation, and upstream termination.
-- [ ] Phase 4.6: Verify large round trips, interoperability, failures, and empty input.
-- [ ] Phase 4.7: Pass the epic gate and commit the completed write scope.
+- [x] Phase 4.1: Define schema-validated bounded-batch write contracts.
+- [x] Phase 4.2: Implement incremental native writing with row-group/page limits.
+- [x] Phase 4.3: Publish staged local output create-only after successful writer close.
+- [x] Phase 4.4: Add supported compression codecs and a tested default.
+- [x] Phase 4.5: Add bounded backpressure, cancellation, and upstream termination.
+- [x] Phase 4.6: Verify large round trips, interoperability, failures, and empty input.
+- [x] Phase 4.7: Pass the epic gate and commit the completed write scope.
 
 ## Implementation Steps
 
@@ -22,22 +22,22 @@
 
 ## Test Isolation Checklist
 
-- [ ] Every write test uses a unique temporary source/destination and verifies cleanup.
-- [ ] Input batches and schemas are deterministic and bounded independently of total rows.
-- [ ] Codec tests assert actual file metadata and use an independent compatible reader.
-- [ ] Failure and cancellation tests synchronize at known producer/writer boundaries.
-- [ ] Memory tests write output materially larger than all configured buffers.
-- [ ] Existing-file tests preserve and compare original bytes after rejected/incomplete writes.
+- [x] Every write test uses a unique temporary source/destination and verifies cleanup.
+- [x] Input batches and schemas are deterministic and bounded independently of total rows.
+- [x] Codec tests assert actual file metadata and use an independent compatible reader.
+- [x] Failure and cancellation tests synchronize at known producer/writer boundaries.
+- [x] Memory tests write output materially larger than all configured buffers.
+- [x] Existing-file tests preserve and compare original bytes after rejected/incomplete writes.
 
 ## Quality Gate
 
-- [ ] Schema, nullability, empty-input, row-group, page, and metadata tests pass.
-- [ ] Every advertised compression codec and the documented default pass independent-reader round trips.
-- [ ] Backpressure, upstream failure, cancellation, temporary cleanup, create-only conflict, and complete-or-absent publication tests pass.
-- [ ] Large-output buffering stays within the documented bounded-memory tolerance.
-- [ ] `bin/qa_check.sh` succeeds before the epic commit.
-- [ ] Git diff is focused on EPIC004 and contains no S3, filtering, table-format, or compaction behavior.
-- [ ] Commit title and informative body follow the commit rule.
+- [x] Schema, nullability, empty-input, row-group, page, and metadata tests pass.
+- [x] Every advertised compression codec and the documented default pass independent-reader round trips.
+- [x] Backpressure, upstream failure, cancellation, temporary cleanup, create-only conflict, and complete-or-absent publication tests pass.
+- [x] Large-output buffering stays within the documented bounded-memory tolerance.
+- [x] `bin/qa_check.sh` succeeds before the epic commit.
+- [x] Git diff is focused on EPIC004 and contains no S3, filtering, table-format, or compaction behavior.
+- [x] Commit title and informative body follow the commit rule.
 
 ## Commit Rule
 

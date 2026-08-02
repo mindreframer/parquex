@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::io::{self, Read};
@@ -14,6 +15,7 @@ use arrow_schema::{DataType, Field, TimeUnit};
 use bytes::Bytes;
 use parquet::arrow::arrow_reader::{ParquetRecordBatchReader, ParquetRecordBatchReaderBuilder};
 use parquet::arrow::ProjectionMask;
+use parquet::basic::Compression;
 use parquet::errors::{ParquetError, Result as ParquetResult};
 use parquet::file::reader::{ChunkReader, Length};
 use rustler::{Encoder, Env, OwnedBinary, Resource, Term};
@@ -186,6 +188,9 @@ struct ReaderState {
     peak_buffered_batches: usize,
     active: bool,
     eof: bool,
+    row_groups: usize,
+    compressions: Vec<String>,
+    writer_options: HashMap<String, String>,
 }
 
 impl ReaderState {
@@ -252,6 +257,9 @@ impl ReaderState {
             range_requests: self.range_metrics.requests.load(Ordering::Relaxed),
             range_bytes: self.range_metrics.bytes.load(Ordering::Relaxed),
             max_range_bytes: self.range_metrics.max_request_bytes.load(Ordering::Relaxed),
+            row_groups: self.row_groups,
+            compressions: self.compressions.clone(),
+            writer_options: self.writer_options.clone(),
         }
     }
 }
@@ -272,6 +280,9 @@ pub(crate) struct ReaderStats {
     range_requests: u64,
     range_bytes: u64,
     max_range_bytes: u64,
+    row_groups: usize,
+    compressions: Vec<String>,
+    writer_options: HashMap<String, String>,
 }
 
 #[derive(rustler::NifMap)]
@@ -336,6 +347,30 @@ pub(crate) fn open(
         .map_err(|_error| malformed_open())?;
 
     let all_fields = builder.schema().fields();
+    let row_groups = builder.metadata().num_row_groups();
+    let mut compressions = builder
+        .metadata()
+        .row_groups()
+        .iter()
+        .flat_map(|row_group| row_group.columns())
+        .map(|column| compression_label(column.compression()).to_owned())
+        .collect::<Vec<_>>();
+    compressions.sort_unstable();
+    compressions.dedup();
+    let writer_options = builder
+        .metadata()
+        .file_metadata()
+        .key_value_metadata()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            entry
+                .value
+                .as_ref()
+                .map(|value| (entry.key.clone(), value.clone()))
+        })
+        .filter(|(key, _value)| key.starts_with("parquex."))
+        .collect();
     let native_all_fields = all_fields
         .iter()
         .map(|field| native_field(field))
@@ -374,6 +409,9 @@ pub(crate) fn open(
                 peak_buffered_batches: 0,
                 active: true,
                 eof: false,
+                row_groups,
+                compressions,
+                writer_options,
             }),
         },
         projected_fields,
@@ -382,6 +420,19 @@ pub(crate) fn open(
 
 pub(crate) fn active_readers() -> usize {
     ACTIVE_READERS.load(Ordering::Relaxed)
+}
+
+fn compression_label(compression: Compression) -> &'static str {
+    match compression {
+        Compression::UNCOMPRESSED => "uncompressed",
+        Compression::SNAPPY => "snappy",
+        Compression::GZIP(_) => "gzip",
+        Compression::ZSTD(_) => "zstd",
+        Compression::LZ4_RAW => "lz4_raw",
+        Compression::LZO => "lzo",
+        Compression::BROTLI(_) => "brotli",
+        Compression::LZ4 => "lz4",
+    }
 }
 
 fn malformed_open() -> NativeFailure {

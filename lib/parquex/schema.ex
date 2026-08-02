@@ -60,6 +60,60 @@ defmodule Parquex.Schema do
 
   def from_native(_fields), do: invalid_schema()
 
+  @doc false
+  @spec to_native(t()) :: [map()]
+  def to_native(%__MODULE__{fields: fields}), do: Enum.map(fields, &encode_field/1)
+
+  defp encode_field(%Field{} = field) do
+    data_type =
+      Map.merge(
+        %{
+          bit_width: nil,
+          signed: nil,
+          unit: nil,
+          timezone: nil,
+          precision: nil,
+          scale: nil,
+          length: nil,
+          children: []
+        },
+        encode_type(field.type)
+      )
+
+    %{name: field.name, nullable: field.nullable, data_type: data_type}
+  end
+
+  defp encode_type(:boolean), do: %{kind: :boolean}
+  defp encode_type(:utf8), do: %{kind: :utf8}
+  defp encode_type(:binary), do: %{kind: :binary}
+  defp encode_type(:date32), do: %{kind: :date32}
+  defp encode_type(:date64), do: %{kind: :date64}
+  defp encode_type(:null), do: %{kind: :null}
+
+  defp encode_type({:integer, bits, signed}),
+    do: %{kind: :integer, bit_width: bits, signed: signed}
+
+  defp encode_type({:float, bits}), do: %{kind: :float, bit_width: bits}
+  defp encode_type({:fixed_binary, length}), do: %{kind: :fixed_binary, length: length}
+  defp encode_type({:time, unit, bits}), do: %{kind: :time, unit: unit, bit_width: bits}
+
+  defp encode_type({:timestamp, unit, timezone}),
+    do: %{kind: :timestamp, unit: unit, timezone: timezone}
+
+  defp encode_type({:duration, unit}), do: %{kind: :duration, unit: unit}
+
+  defp encode_type({:decimal, bits, precision, scale}),
+    do: %{kind: :decimal, bit_width: bits, precision: precision, scale: scale}
+
+  defp encode_type({kind, %Field{} = field}) when kind in [:list, :large_list],
+    do: %{kind: kind, children: [encode_field(field)]}
+
+  defp encode_type({:fixed_list, %Field{} = field, length}),
+    do: %{kind: :fixed_list, children: [encode_field(field)], length: length}
+
+  defp encode_type({:struct, fields}),
+    do: %{kind: :struct, children: Enum.map(fields, &encode_field/1)}
+
   defp decode_fields(fields) do
     fields
     |> Enum.reduce_while({:ok, []}, fn field, {:ok, decoded} ->

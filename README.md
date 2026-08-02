@@ -6,8 +6,8 @@ backpressured: object size and result cardinality must not determine peak memory
 usage.
 
 The local object layer supports bounded ranges and safely published new
-objects. Local Parquet reads are lazy, projected, and bounded by explicit batch,
-prefetch, and range limits. Parquet writing and S3 I/O remain roadmap work. The
+objects. Local Parquet reads and writes are lazy and bounded by explicit batch,
+prefetch, range, row-group, and page limits. S3 I/O remains roadmap work. The
 native diagnostic verifies the packaged Rustler boundary:
 
 ```elixir
@@ -82,6 +82,41 @@ when row maps for one bounded batch are actually needed.
 
 The supported schema/value mappings and buffering envelope are documented in
 [`docs/parquet-reads.md`](docs/parquet-reads.md).
+
+## Streaming Parquet writes
+
+`Parquex.write/4` consumes one compatible bounded batch at a time and publishes
+only after the Parquet footer is complete:
+
+```elixir
+alias Parquex.Schema.Field
+
+schema = %Parquex.Schema{
+  fields: [
+    %Field{name: "event_id", type: {:integer, 64, true}, nullable: false},
+    %Field{name: "payload", type: :binary, nullable: true}
+  ]
+}
+
+{:ok, batch} =
+  Parquex.Batch.new(schema, %{
+    "event_id" => [1, 2],
+    "payload" => [<<1>>, nil]
+  })
+
+{:ok, metadata} =
+  Parquex.write(location, schema, [batch],
+    compression: :snappy,
+    max_batch_rows: 65_536,
+    max_row_group_rows: 1_048_576,
+    data_page_size_limit: 1_048_576
+  )
+```
+
+The destination is create-only: a conflict preserves the existing bytes.
+Producer failure, cancellation, or owner exit removes the unique sibling staging
+file. See [`docs/parquet-writes.md`](docs/parquet-writes.md) for codecs, the
+empty-input policy, incremental writer operations, and memory limits.
 
 ## Architecture
 

@@ -7,6 +7,7 @@ mod error;
 mod local;
 mod object;
 mod reader;
+mod writer;
 
 use error::NativeFailure;
 use local::{LocalStore, LocalWriter};
@@ -74,7 +75,17 @@ pub(crate) mod atoms {
         millisecond,
         microsecond,
         nanosecond,
-        nil_atom = "nil"
+        nil_atom = "nil",
+        uncompressed,
+        snappy,
+        zstd,
+        gzip,
+        lz4_raw,
+        parquet_writer_open,
+        parquet_writer_write,
+        parquet_writer_close,
+        parquet_writer_abort,
+        parquet_writer_stats
     }
 }
 
@@ -95,6 +106,11 @@ pub(crate) enum Operation {
     ReaderNext,
     ReaderClose,
     ReaderStats,
+    ParquetWriterOpen,
+    ParquetWriterWrite,
+    ParquetWriterClose,
+    ParquetWriterAbort,
+    ParquetWriterStats,
 }
 
 impl Operation {
@@ -115,6 +131,11 @@ impl Operation {
             Self::ReaderNext => atoms::reader_next(),
             Self::ReaderClose => atoms::reader_close(),
             Self::ReaderStats => atoms::reader_stats(),
+            Self::ParquetWriterOpen => atoms::parquet_writer_open(),
+            Self::ParquetWriterWrite => atoms::parquet_writer_write(),
+            Self::ParquetWriterClose => atoms::parquet_writer_close(),
+            Self::ParquetWriterAbort => atoms::parquet_writer_abort(),
+            Self::ParquetWriterStats => atoms::parquet_writer_stats(),
         }
     }
 }
@@ -437,6 +458,72 @@ fn reader_close(env: Env<'_>, resource: ResourceArc<reader::ReaderResource>) -> 
 #[rustler::nif]
 fn reader_stats(env: Env<'_>, resource: ResourceArc<reader::ReaderResource>) -> Term<'_> {
     encode_guarded(env, Operation::ReaderStats, || resource.stats())
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn parquet_writer_open(
+    env: Env<'_>,
+    path: String,
+    allowed_root: Option<String>,
+    schema: Vec<writer::InputField>,
+    options: writer::NativeWriterOptions,
+    owner: LocalPid,
+) -> Term<'_> {
+    encode_guarded(env, Operation::ParquetWriterOpen, || {
+        let resource =
+            ResourceArc::new(writer::open(location(path, allowed_root), schema, options)?);
+        if env.monitor(&resource, &owner).is_none() {
+            resource.abort()?;
+            return Err(NativeFailure::expected(
+                Operation::ParquetWriterOpen,
+                "could not monitor Parquet writer owner",
+            ));
+        }
+        Ok(resource)
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn parquet_writer_write<'a>(
+    env: Env<'a>,
+    resource: ResourceArc<writer::ParquetWriterResource>,
+    batch: Term<'a>,
+) -> Term<'a> {
+    encode_guarded(env, Operation::ParquetWriterWrite, || {
+        resource.write_batch(batch)
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn parquet_writer_close(
+    env: Env<'_>,
+    resource: ResourceArc<writer::ParquetWriterResource>,
+) -> Term<'_> {
+    encode_guarded(env, Operation::ParquetWriterClose, || {
+        resource.close().map(NativeMetadata::from)
+    })
+}
+
+#[rustler::nif]
+fn parquet_writer_abort(
+    env: Env<'_>,
+    resource: ResourceArc<writer::ParquetWriterResource>,
+) -> Term<'_> {
+    encode_guarded(env, Operation::ParquetWriterAbort, || {
+        Ok(if resource.abort()? {
+            atoms::aborted()
+        } else {
+            atoms::closed()
+        })
+    })
+}
+
+#[rustler::nif]
+fn parquet_writer_stats(
+    env: Env<'_>,
+    resource: ResourceArc<writer::ParquetWriterResource>,
+) -> Term<'_> {
+    encode_guarded(env, Operation::ParquetWriterStats, || resource.stats())
 }
 
 rustler::init!("Elixir.Parquex.Native");

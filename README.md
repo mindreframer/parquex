@@ -211,6 +211,28 @@ running for fast repeated checks; use `docker compose down --volumes` when you
 want to remove them. Running `mix test` directly excludes those tests unless
 `PARQUEX_RUSTFS_INTEGRATION=1` is set.
 
+GitHub Actions runs the same gate on Ubuntu with the project-owned RustFS
+service. Precompiled releases use one bounded seven-target matrix: macOS ARM
+and Intel, Linux ARM and x86_64 with glibc and musl, and Windows x86_64. All
+artifacts target NIF 2.16 and are directly loaded on a matching runner before
+publication.
+
+Maintainers publish precompiled NIFs explicitly after the version in `mix.exs`
+and `native/parquex_nif/Cargo.toml` is synchronized:
+
+```sh
+git push origin main
+gh workflow run precompiled-release.yml --ref main -f publish=true
+gh run watch "$(gh run list --workflow precompiled-release.yml --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+mix rustler_precompiled.download Parquex.Native --all --print
+```
+
+Commit the generated `checksum-Elixir.Parquex.Native.exs` and wait for the CI
+precompiled-consumer jobs. Those jobs compile an unpacked downstream package
+with `cargo` and `rustc` replaced by failing shims, proving that consumers load
+the released binary rather than silently rebuilding it. Set `PARQUEX_BUILD=1`
+to force a source build when developing or diagnosing a platform issue.
+
 ## Installation
 
 For the 0.1 release line, add Parquex to your dependencies:

@@ -7,6 +7,10 @@ publish = false
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+default = ["nif_version_2_16"]
+nif_version_2_16 = ["rustler/nif_version_2_16"]
+
 [dependencies]
 arrow-array = "=59.1.0"
 arrow-buffer = "=59.1.0"

@@ -33,10 +33,14 @@ with object metadata.
 
 ## Native build
 
+Official releases provide NIF 2.16 binaries for macOS ARM/Intel, Linux ARM and
+x86_64 with glibc or musl, and Windows x86_64. Each artifact is directly loaded
+in CI on a matching runtime before publication. Set `PARQUEX_BUILD=1` to force
+a source build.
+
 Building from source requires Elixir/OTP, Cargo, a C toolchain, and Rust 1.91.0.
 Rustler invokes the system toolchain selected as `+1.91.0`; Cargo dependencies
-are pinned in `native/parquex_nif/Cargo.lock`. No precompiled NIF is shipped in
-the initial source package.
+are pinned in `native/parquex_nif/Cargo.lock`.
 
 Run `mix deps.get` followed by `mix compile`. The authoritative logic quality
 command is `bin/qa_check.sh`, which also requires Docker Compose for its

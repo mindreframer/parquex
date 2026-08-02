@@ -1,11 +1,16 @@
 defmodule Parquex.MixProject do
   use Mix.Project
 
+  @version "0.1.0"
+  @source_url "https://github.com/mindreframer/parquex"
+
   def project do
     [
       app: :parquex,
-      version: "0.1.0",
+      version: @version,
       description: "Bounded streaming Parquet for local and S3-compatible immutable objects",
+      source_url: @source_url,
+      homepage_url: @source_url,
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -25,7 +30,8 @@ defmodule Parquex.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:rustler, "== 0.38.0", runtime: false},
+      {:rustler, "== 0.38.0", optional: true, runtime: false},
+      {:rustler_precompiled, "== 0.8.4"},
       {:telemetry, "== 1.4.2"},
       {:ex_doc, "== 0.40.3", only: :dev, runtime: false}
     ]
@@ -50,12 +56,15 @@ defmodule Parquex.MixProject do
 
   defp package do
     [
-      files: ~w(lib native/parquex_nif/src native/parquex_nif/Cargo.toml
-                native/parquex_nif/Cargo.lock README.md CHANGELOG.md SECURITY.md
-                LICENSE docs mix.exs rust-toolchain.toml),
+      files:
+        ~w(lib native/parquex_nif/src native/parquex_nif/Cargo.toml
+           native/parquex_nif/Cargo.lock README.md CHANGELOG.md SECURITY.md
+           LICENSE docs mix.exs rust-toolchain.toml) ++
+          Path.wildcard("checksum-Elixir.Parquex.Native.exs"),
       licenses: ["LicenseRef-Proprietary"],
       links: %{
         "Documentation" => "https://hexdocs.pm/parquex",
+        "Source" => @source_url,
         "Package" => "https://hex.pm/packages/parquex"
       }
     ]

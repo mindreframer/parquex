@@ -1,12 +1,44 @@
 defmodule Parquex.Native do
   @moduledoc false
 
-  use Rustler,
+  @version Mix.Project.config()[:version]
+  @force_build Mix.env() == :test or
+                 not (File.exists?(
+                        Path.expand("../../checksum-Elixir.Parquex.Native.exs", __DIR__)
+                      ) and
+                        String.contains?(
+                          File.read!(
+                            Path.expand("../../checksum-Elixir.Parquex.Native.exs", __DIR__)
+                          ),
+                          "-v#{@version}-"
+                        )) or
+                 String.downcase(System.get_env("PARQUEX_BUILD", "")) in [
+                   "1",
+                   "true",
+                   "yes",
+                   "on"
+                 ]
+
+  use RustlerPrecompiled,
     otp_app: :parquex,
-    crate: :parquex_nif,
+    crate: "parquex_nif",
+    base_url: "https://github.com/mindreframer/parquex/releases/download/v#{@version}",
+    version: @version,
+    nif_versions: ["2.16"],
+    targets: ~w(
+      aarch64-apple-darwin
+      x86_64-apple-darwin
+      aarch64-unknown-linux-gnu
+      aarch64-unknown-linux-musl
+      x86_64-unknown-linux-gnu
+      x86_64-unknown-linux-musl
+      x86_64-pc-windows-msvc
+    ),
+    force_build: @force_build,
     path: "native/parquex_nif",
     cargo: {:system, "+1.91.0"},
-    mode: if(Mix.env() == :prod, do: :release, else: :debug)
+    mode: if(Mix.env() == :prod, do: :release, else: :debug),
+    features: ["nif_version_2_16"]
 
   @spec smoke() :: {:ok, pos_integer()} | {:error, map()}
   def smoke, do: :erlang.nif_error(:nif_not_loaded)

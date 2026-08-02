@@ -25,10 +25,14 @@ defmodule Parquex do
         ) :: {:ok, Parquex.Stream.t() | Parquex.MultiStream.t()} | {:error, Parquex.Error.t()}
   def scan(location, options \\ [])
 
-  def scan(locations, options) when is_list(locations),
+  def scan(source, options) do
+    Parquex.Telemetry.span(:scan, source, fn -> do_scan(source, options) end)
+  end
+
+  defp do_scan(locations, options) when is_list(locations),
     do: Parquex.MultiStream.open(locations, options)
 
-  def scan(location, options), do: Parquex.Reader.open(location, options)
+  defp do_scan(location, options), do: Parquex.Reader.open(location, options)
 
   @doc "Inspects a Parquet schema using bounded local or S3 metadata reads."
   @spec schema(
@@ -59,6 +63,12 @@ defmodule Parquex do
         ) ::
           {:ok, Parquex.Object.Metadata.t()} | {:error, Parquex.Error.t()}
   def write(location, schema, batches, options \\ []) do
+    Parquex.Telemetry.span(:write, location, fn ->
+      do_write(location, schema, batches, options)
+    end)
+  end
+
+  defp do_write(location, schema, batches, options) do
     with {:ok, writer} <- Parquex.Writer.open(location, schema, options) do
       try do
         with :ok <- write_batches(writer, batches),
@@ -81,16 +91,18 @@ defmodule Parquex do
   def append(prefix, schema, batches, options \\ [])
 
   def append(prefix, schema, batches, options) when is_list(options) do
-    if Keyword.keyword?(options) do
-      {name, writer_options} = Keyword.pop(options, :name, append_name())
+    Parquex.Telemetry.span(:append, prefix, fn ->
+      if Keyword.keyword?(options) do
+        {name, writer_options} = Keyword.pop(options, :name, append_name())
 
-      with {:ok, %Parquex.Location{} = prefix} <- normalize_append_prefix(prefix),
-           {:ok, destination} <- Parquex.Location.child(prefix, name) do
-        write(destination, schema, batches, writer_options)
+        with {:ok, %Parquex.Location{} = prefix} <- normalize_append_prefix(prefix),
+             {:ok, destination} <- Parquex.Location.child(prefix, name) do
+          write(destination, schema, batches, writer_options)
+        end
+      else
+        append_error("append options must be a keyword list")
       end
-    else
-      append_error("append options must be a keyword list")
-    end
+    end)
   end
 
   def append(_prefix, _schema, _batches, _options),

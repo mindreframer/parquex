@@ -8,21 +8,29 @@ defmodule Parquex.Object do
   owned staging if enumeration fails.
   """
 
-  alias Parquex.{Error, Location, Native}
+  alias Parquex.{Error, Location, Native, Telemetry}
   alias Parquex.Object.{Metadata, Writer}
 
   @type one_or_many(result) :: {:ok, result | [result]} | {:error, Error.t()}
 
   @doc "Returns metadata for one location or a caller-ordered location list."
   @spec head(Location.t() | [Location.t()]) :: one_or_many(Metadata.t())
-  def head(locations), do: map_locations(locations, &head_one/1)
+  def head(locations) do
+    result = map_locations(locations, &head_one/1)
+    Telemetry.storage(:head, locations, %{objects: successful_count(result)})
+    result
+  end
 
   @doc "Reads at most `length` bytes beginning at `offset`."
   @spec read_range(Location.t() | [Location.t()], non_neg_integer(), non_neg_integer()) ::
           one_or_many(binary())
   def read_range(locations, offset, length)
       when is_integer(offset) and offset >= 0 and is_integer(length) and length >= 0 do
-    map_locations(locations, fn location -> read_range_one(location, offset, length) end)
+    result = map_locations(locations, fn location -> read_range_one(location, offset, length) end)
+
+    {requests, bytes} = range_measurements(result)
+    Telemetry.storage(:read_range, locations, %{range_requests: requests, bytes: bytes})
+    result
   end
 
   def read_range(_locations, _offset, _length),
@@ -143,6 +151,16 @@ defmodule Parquex.Object do
       _other -> %{active_writers: :unknown, bytes_read: :unknown}
     end
   end
+
+  defp successful_count({:ok, values}) when is_list(values), do: length(values)
+  defp successful_count({:ok, _value}), do: 1
+  defp successful_count(_result), do: 0
+
+  defp range_measurements({:ok, values}) when is_list(values),
+    do: {length(values), Enum.sum(Enum.map(values, &byte_size/1))}
+
+  defp range_measurements({:ok, value}) when is_binary(value), do: {1, byte_size(value)}
+  defp range_measurements(_result), do: {0, 0}
 
   defp write_chunks(writer, chunks) do
     Enum.reduce_while(chunks, :ok, fn chunk, :ok ->

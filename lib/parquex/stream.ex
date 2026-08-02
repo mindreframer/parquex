@@ -20,6 +20,8 @@ defmodule Parquex.Stream do
   @doc "Closes and cancels the native reader. This operation is idempotent."
   @spec close(t()) :: :ok | {:error, Error.t()}
   def close(%__MODULE__{resource: resource}) do
+    Parquex.Telemetry.cancellation(:reader, :unknown)
+
     case native_result(Native.reader_close(resource)) do
       {:ok, _state} -> :ok
       {:error, _error} = error -> error
@@ -28,7 +30,16 @@ defmodule Parquex.Stream do
 
   @doc "Returns deterministic native buffering and range-read counters."
   @spec stats(t()) :: {:ok, map()} | {:error, Error.t()}
-  def stats(%__MODULE__{resource: resource}), do: native_result(Native.reader_stats(resource))
+  def stats(%__MODULE__{resource: resource}) do
+    case native_result(Native.reader_stats(resource)) do
+      {:ok, stats} = result ->
+        Parquex.Telemetry.stats(:read, stats)
+        result
+
+      error ->
+        error
+    end
+  end
 
   @doc false
   @spec new(reference(), Schema.t()) :: t()
@@ -50,8 +61,12 @@ defmodule Parquex.Stream do
 
       {:ok, native_batch} ->
         case Batch.from_native(schema, native_batch) do
-          {:ok, batch} -> {[batch], reader}
-          {:error, %Error{} = error} -> raise error
+          {:ok, batch} ->
+            Parquex.Telemetry.batch(:read, batch)
+            {[batch], reader}
+
+          {:error, %Error{} = error} ->
+            raise error
         end
 
       {:error, %Error{} = error} ->

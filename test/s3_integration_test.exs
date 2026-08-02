@@ -111,6 +111,39 @@ defmodule Parquex.S3IntegrationTest do
     refute_receive {:retry_request, 4}, 50
   end
 
+  test "timeout, connection reset, and multipart-open faults terminate without resources" do
+    {timeout_endpoint, timeout_server} = stalled_endpoint(self())
+    on_exit(fn -> Process.exit(timeout_server, :kill) end)
+
+    timed_out =
+      location("faults/timeout.bin",
+        endpoint: timeout_endpoint,
+        request_timeout_ms: 100,
+        max_retries: 0
+      )
+
+    assert {:error, %Error{category: :native_failure, retryable: true}} = Object.head(timed_out)
+    assert_receive {:stalled_request, socket}, 1_000
+    send(timeout_server, {:release, socket})
+
+    {reset_endpoint, reset_server} = reset_endpoint()
+    on_exit(fn -> Process.exit(reset_server, :kill) end)
+    reset = location("faults/reset.bin", endpoint: reset_endpoint, max_retries: 0)
+    assert {:error, %Error{category: :native_failure, retryable: true}} = Object.head(reset)
+
+    {multipart_endpoint, multipart_server} = unavailable_endpoint()
+    on_exit(fn -> Process.exit(multipart_server, :kill) end)
+
+    destination =
+      location("faults/multipart.parquet", endpoint: multipart_endpoint, max_retries: 0)
+
+    assert {:error, %Error{category: :native_failure, retryable: true}} =
+             Parquex.Writer.open(destination, schema())
+
+    assert Object.resource_snapshot().active_s3_requests == 0
+    assert Object.resource_snapshot().active_multipart_uploads == 0
+  end
+
   test "Parquet projection and every compression round-trip over bounded S3 ranges", %{
     prefix: prefix
   } do
@@ -340,5 +373,59 @@ defmodule Parquex.S3IntegrationTest do
       {:ok, entries} -> Enum.each(entries, &Object.delete(&1.location))
       _error -> :ok
     end
+  end
+
+  defp stalled_endpoint(parent) do
+    {:ok, listener} =
+      :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}])
+
+    {:ok, {{127, 0, 0, 1}, port}} = :inet.sockname(listener)
+
+    server =
+      spawn(fn ->
+        {:ok, socket} = :gen_tcp.accept(listener)
+        {:ok, _request} = :gen_tcp.recv(socket, 0, 2_000)
+        send(parent, {:stalled_request, socket})
+
+        receive do
+          {:release, ^socket} -> :gen_tcp.close(socket)
+        end
+
+        :gen_tcp.close(listener)
+      end)
+
+    {"http://127.0.0.1:#{port}", server}
+  end
+
+  defp reset_endpoint do
+    one_shot_endpoint(fn socket -> :gen_tcp.close(socket) end)
+  end
+
+  defp unavailable_endpoint do
+    one_shot_endpoint(fn socket ->
+      :gen_tcp.send(
+        socket,
+        "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+      )
+
+      :gen_tcp.close(socket)
+    end)
+  end
+
+  defp one_shot_endpoint(response) do
+    {:ok, listener} =
+      :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}])
+
+    {:ok, {{127, 0, 0, 1}, port}} = :inet.sockname(listener)
+
+    server =
+      spawn(fn ->
+        {:ok, socket} = :gen_tcp.accept(listener)
+        {:ok, _request} = :gen_tcp.recv(socket, 0, 2_000)
+        response.(socket)
+        :gen_tcp.close(listener)
+      end)
+
+    {"http://127.0.0.1:#{port}", server}
   end
 end

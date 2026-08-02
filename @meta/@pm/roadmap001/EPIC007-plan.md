@@ -2,13 +2,13 @@
 
 ## Progress
 
-- [ ] Phase 7.1: Stabilize the public contract.
-- [ ] Phase 7.2: Add safe observability.
-- [ ] Phase 7.3: Exercise fault paths.
-- [ ] Phase 7.4: Enforce memory and scheduler budgets.
-- [ ] Phase 7.5: Complete user documentation.
-- [ ] Phase 7.6: Prepare release artifacts.
-- [ ] Phase 7.7: Pass the final epic gate.
+- [x] Phase 7.1: Stabilize the public contract.
+- [x] Phase 7.2: Add safe observability.
+- [x] Phase 7.3: Exercise fault paths.
+- [x] Phase 7.4: Enforce memory and scheduler budgets.
+- [x] Phase 7.5: Complete user documentation.
+- [x] Phase 7.6: Prepare release artifacts.
+- [x] Phase 7.7: Pass the final epic gate.
 
 ## Implementation Steps
 
@@ -22,25 +22,25 @@
 
 ## Test Isolation Checklist
 
-- [ ] Every local and S3 scenario uses unique temporary paths/prefixes and deterministic fixtures.
-- [ ] Fault injection uses controlled hooks or RustFS/client responses, never external network instability or arbitrary sleeps.
-- [ ] Memory tests use explicit configuration, warm-up policy, measurement boundaries, and documented tolerances.
-- [ ] Scheduler tests use bounded deadlines and workload-independent responsiveness assertions.
-- [ ] Telemetry handlers are detached after each test and captured events contain no secrets or row data.
-- [ ] Every test reaps workers and verifies cleanup of files, requests, resources, and multipart uploads.
-- [ ] Clean-checkout/package checks do not depend on untracked files, cached build artifacts, the sibling `RUSTFS_TOOL`, or live services outside the QA-managed `docker-compose.yml` environment.
+- [x] Every local and S3 scenario uses unique temporary paths/prefixes and deterministic fixtures.
+- [x] Fault injection uses controlled hooks or RustFS/client responses, never external network instability or arbitrary sleeps.
+- [x] Memory tests use explicit configuration, warm-up policy, measurement boundaries, and documented tolerances.
+- [x] Scheduler tests use bounded deadlines and workload-independent responsiveness assertions.
+- [x] Telemetry handlers are detached after each test and captured events contain no secrets or row data.
+- [x] Every test reaps workers and verifies cleanup of files, requests, resources, and multipart uploads.
+- [x] Clean-checkout/package checks do not depend on untracked files, cached build artifacts, the sibling `RUSTFS_TOOL`, or live services outside the QA-managed `docker-compose.yml` environment.
 
 ## Quality Gate
 
-- [ ] Public contract and telemetry reviews have no unresolved release blockers.
-- [ ] All documented examples and fault-injection scenarios pass deterministically.
-- [ ] Local/S3 memory, bounded-concurrency, cancellation, cleanup, and scheduler responsiveness tests pass.
-- [ ] Telemetry, errors, logs, fixtures, and package contents disclose no credentials or row contents.
-- [ ] Documentation and release notes accurately state supported behavior and deferred scope.
-- [ ] The pinned RustFS `docker-compose.yml` workflow, readiness diagnostics, and teardown pass from a clean checkout.
-- [ ] Package compilation, package-content checks, and documentation generation pass from a clean checkout.
-- [ ] `bin/qa_check.sh` succeeds from the final clean checkout and the diff contains only EPIC007 work.
-- [ ] Commit title and informative body follow the commit rule.
+- [x] Public contract and telemetry reviews have no unresolved release blockers.
+- [x] All documented examples and fault-injection scenarios pass deterministically.
+- [x] Local/S3 memory, bounded-concurrency, cancellation, cleanup, and scheduler responsiveness tests pass.
+- [x] Telemetry, errors, logs, fixtures, and package contents disclose no credentials or row contents.
+- [x] Documentation and release notes accurately state supported behavior and deferred scope.
+- [x] The pinned RustFS `docker-compose.yml` workflow, readiness diagnostics, and teardown pass from a clean checkout.
+- [x] Package compilation, package-content checks, and documentation generation pass from a clean checkout.
+- [x] `bin/qa_check.sh` succeeds from the final clean checkout and the diff contains only EPIC007 work.
+- [x] Commit title and informative body follow the commit rule.
 
 ## Commit Rule
 

@@ -66,6 +66,8 @@ defmodule Parquex.MultiStream do
   @doc "Closes the currently active source. This operation is idempotent."
   @spec close(t()) :: :ok | {:error, Error.t()}
   def close(%__MODULE__{control: control}) do
+    Parquex.Telemetry.cancellation(:mixed_reader, :mixed)
+
     if Process.alive?(control) do
       current = Agent.get_and_update(control, &{&1, nil})
       result = if match?(%Stream{}, current), do: Stream.close(current), else: :ok

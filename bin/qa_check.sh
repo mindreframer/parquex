@@ -5,6 +5,7 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${project_root}"
 
 compose_started=0
+package_audit_dir=""
 
 cleanup() {
   status=$?
@@ -18,6 +19,10 @@ cleanup() {
     docker compose down --volumes --remove-orphans || true
   fi
 
+  if [[ -n "${package_audit_dir}" && -d "${package_audit_dir}" ]]; then
+    rm -rf -- "${package_audit_dir}"
+  fi
+
   exit "${status}"
 }
 
@@ -26,6 +31,20 @@ trap cleanup EXIT
 mix deps.get --check-locked
 mix format --check-formatted
 MIX_ENV=test mix compile --force --warnings-as-errors
+MIX_ENV=dev mix docs --warnings-as-errors
+
+package_audit_dir="$(mktemp -d)"
+mix hex.build --unpack --output "${package_audit_dir}/package"
+test -f "${package_audit_dir}/package/native/parquex_nif/Cargo.lock"
+test -f "${package_audit_dir}/package/docs/release.md"
+test ! -e "${package_audit_dir}/package/priv/native/parquex_nif.so"
+! rg -n 'parquex-test-secret-not-for-production|row-value-that-must-not-enter-telemetry' \
+  "${package_audit_dir}/package"
+(
+  cd "${package_audit_dir}/package"
+  MIX_ENV=prod mix deps.get --only prod
+  MIX_ENV=prod mix compile --force --warnings-as-errors
+)
 
 docker info >/dev/null
 docker compose config --quiet

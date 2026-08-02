@@ -65,8 +65,12 @@ defmodule Parquex.Writer do
 
       true ->
         case native_result(Native.parquet_writer_write(writer.resource, Batch.to_native(batch))) do
-          {:ok, _stats} -> :ok
-          {:error, _error} = error -> error
+          {:ok, _stats} ->
+            Parquex.Telemetry.batch(:write, batch)
+            :ok
+
+          {:error, _error} = error ->
+            error
         end
     end
   end
@@ -84,6 +88,8 @@ defmodule Parquex.Writer do
 
   @spec cancel(t()) :: :ok | {:error, Error.t()}
   def cancel(%__MODULE__{} = writer) do
+    Parquex.Telemetry.cancellation(:writer, writer)
+
     case native_result(Native.parquet_writer_abort(writer.resource)) do
       {:ok, _state} -> :ok
       {:error, _error} = error -> error
@@ -93,8 +99,16 @@ defmodule Parquex.Writer do
   def cancel(_writer), do: invalid("expected a writer")
 
   @spec stats(t()) :: {:ok, map()} | {:error, Error.t()}
-  def stats(%__MODULE__{} = writer),
-    do: native_result(Native.parquet_writer_stats(writer.resource))
+  def stats(%__MODULE__{} = writer) do
+    case native_result(Native.parquet_writer_stats(writer.resource)) do
+      {:ok, stats} = result ->
+        Parquex.Telemetry.stats(:write, stats)
+        result
+
+      error ->
+        error
+    end
+  end
 
   defp settings(options) do
     options = Keyword.merge(@defaults, options)

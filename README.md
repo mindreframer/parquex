@@ -171,6 +171,20 @@ Producer failure, cancellation, or owner exit removes owned local or remote
 staging. See [`docs/parquet-writes.md`](docs/parquet-writes.md) for codecs, the
 empty-input policy, incremental writer operations, and memory limits.
 
+## Observability and release contract
+
+Parquex emits safe `:telemetry` events for operation duration/status, storage
+bytes and ranges, rows and batches, row groups read/skipped, retryable failures,
+cancellation, and current/peak buffering. Event metadata never contains
+locations, credentials, object keys, schemas, column names, exception messages,
+or row contents. See [`docs/telemetry.md`](docs/telemetry.md).
+
+The supported toolchain, compatibility expectations, native source build,
+tuning guidance, troubleshooting, and explicitly deferred scope are in
+[`docs/release.md`](docs/release.md). Changes are recorded in
+[`CHANGELOG.md`](CHANGELOG.md), and sensitive reports follow
+[`SECURITY.md`](SECURITY.md).
+
 ## Architecture
 
 Public boundaries cover backend-neutral locations, schemas, bounded columnar
@@ -197,7 +211,7 @@ directly excludes those tests unless `PARQUEX_RUSTFS_INTEGRATION=1` is set.
 
 ## Installation
 
-Parquex is not released yet. Once available, add it to your dependencies:
+For the 0.1 release line, add Parquex to your dependencies:
 
 ```elixir
 def deps do

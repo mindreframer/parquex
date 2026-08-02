@@ -1,6 +1,6 @@
 # Streaming Parquet reads
 
-`Parquex.scan/2` opens one local Parquet object and returns a single-pass
+`Parquex.scan/2` opens one local or S3-compatible Parquet object and returns a single-pass
 `Parquex.Stream`. Opening reads bounded footer and schema metadata through the
 same object range contract as public object reads. It does not decode data
 pages. Each enumerable demand performs native I/O and decoding on a dirty I/O

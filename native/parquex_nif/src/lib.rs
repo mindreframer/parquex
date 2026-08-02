@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Mutex;
 
@@ -7,6 +8,7 @@ mod error;
 mod local;
 mod object;
 mod reader;
+mod s3;
 mod writer;
 
 use error::NativeFailure;
@@ -15,6 +17,7 @@ use object::{
     ByteRange, CancellationToken, FlushPolicy, ObjectLocation, ObjectMetadata, ObjectStore,
     StagedWrite, SyncPolicy, WriteOptions,
 };
+use s3::{RemoteMultipartWriter, RemoteObject, S3Config};
 
 pub(crate) mod atoms {
     rustler::atoms! {
@@ -85,7 +88,17 @@ pub(crate) mod atoms {
         parquet_writer_write,
         parquet_writer_close,
         parquet_writer_abort,
-        parquet_writer_stats
+        parquet_writer_stats,
+        standard,
+        explicit,
+        s3_head,
+        s3_read_range,
+        s3_list,
+        s3_delete,
+        s3_writer_open,
+        s3_writer_write,
+        s3_writer_publish,
+        s3_writer_abort
     }
 }
 
@@ -111,6 +124,14 @@ pub(crate) enum Operation {
     ParquetWriterClose,
     ParquetWriterAbort,
     ParquetWriterStats,
+    S3Head,
+    S3ReadRange,
+    S3List,
+    S3Delete,
+    S3WriterOpen,
+    S3WriterWrite,
+    S3WriterPublish,
+    S3WriterAbort,
 }
 
 impl Operation {
@@ -136,6 +157,14 @@ impl Operation {
             Self::ParquetWriterClose => atoms::parquet_writer_close(),
             Self::ParquetWriterAbort => atoms::parquet_writer_abort(),
             Self::ParquetWriterStats => atoms::parquet_writer_stats(),
+            Self::S3Head => atoms::s3_head(),
+            Self::S3ReadRange => atoms::s3_read_range(),
+            Self::S3List => atoms::s3_list(),
+            Self::S3Delete => atoms::s3_delete(),
+            Self::S3WriterOpen => atoms::s3_writer_open(),
+            Self::S3WriterWrite => atoms::s3_writer_write(),
+            Self::S3WriterPublish => atoms::s3_writer_publish(),
+            Self::S3WriterAbort => atoms::s3_writer_abort(),
         }
     }
 }
@@ -178,11 +207,26 @@ impl From<ObjectMetadata> for NativeMetadata {
     }
 }
 
+impl From<s3::RemoteMetadata> for NativeMetadata {
+    fn from(metadata: s3::RemoteMetadata) -> Self {
+        Self {
+            path: metadata.key,
+            size: metadata.size,
+            modified_unix_ns: metadata.modified_unix_ns,
+        }
+    }
+}
+
 #[derive(rustler::NifMap)]
 struct ResourceSnapshot {
     active_writers: usize,
     active_readers: usize,
     bytes_read: u64,
+    active_s3_requests: usize,
+    peak_s3_requests: usize,
+    active_multipart_uploads: usize,
+    s3_range_requests: u64,
+    s3_range_bytes: u64,
 }
 
 #[derive(rustler::NifMap)]
@@ -195,6 +239,21 @@ struct NativeReaderOptions {
 
 struct WriterResource {
     writer: Mutex<LocalWriter>,
+}
+
+struct S3WriterResource {
+    writer: Mutex<RemoteMultipartWriter>,
+    cancellation: std::sync::Arc<CancellationToken>,
+}
+
+#[rustler::resource_impl]
+impl Resource for S3WriterResource {
+    fn down(&self, _env: Env<'_>, _pid: LocalPid, _monitor: Monitor) {
+        self.cancellation.cancel();
+        if let Ok(mut writer) = self.writer.lock() {
+            let _ignored = writer.abort();
+        }
+    }
 }
 
 #[rustler::resource_impl]
@@ -221,6 +280,16 @@ fn lock_writer(
         .writer
         .lock()
         .map_err(|_| NativeFailure::expected(operation, "native writer state is unavailable"))
+}
+
+fn lock_s3_writer(
+    writer: &ResourceArc<S3WriterResource>,
+    operation: Operation,
+) -> Result<std::sync::MutexGuard<'_, RemoteMultipartWriter>, NativeFailure> {
+    writer
+        .writer
+        .lock()
+        .map_err(|_| NativeFailure::expected(operation, "native S3 writer state is unavailable"))
 }
 
 #[rustler::nif]
@@ -368,7 +437,10 @@ fn local_writer_write<'a>(
     data: Binary<'a>,
 ) -> Term<'a> {
     encode_guarded(env, Operation::WriterWrite, || {
-        lock_writer(&writer, Operation::WriterWrite)?.write(data.as_slice())
+        StagedWrite::write(
+            &mut *lock_writer(&writer, Operation::WriterWrite)?,
+            data.as_slice(),
+        )
     })
 }
 
@@ -393,14 +465,142 @@ fn local_writer_abort(env: Env<'_>, writer: ResourceArc<WriterResource>) -> Term
     })
 }
 
+#[rustler::nif(schedule = "DirtyIo")]
+fn s3_head(env: Env<'_>, config: S3Config) -> Term<'_> {
+    encode_guarded(env, Operation::S3Head, || {
+        let cancellation = CancellationToken::default();
+        RemoteObject::new(config)?
+            .head(&cancellation, Operation::S3Head)
+            .map(NativeMetadata::from)
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn s3_read_range<'a>(env: Env<'a>, config: S3Config, offset: u64, length: u64) -> Term<'a> {
+    match guarded(Operation::S3ReadRange, || {
+        let length = usize::try_from(length).map_err(|_| {
+            NativeFailure::invalid(Operation::S3ReadRange, "S3 range length is too large")
+        })?;
+        let cancellation = CancellationToken::default();
+        RemoteObject::new(config)?.read_range(offset, length, &cancellation, Operation::S3ReadRange)
+    }) {
+        Ok(bytes) => match OwnedBinary::new(bytes.len()) {
+            Some(mut binary) => {
+                binary.as_mut_slice().copy_from_slice(&bytes);
+                (atoms::ok(), binary.release(env)).encode(env)
+            }
+            None => (
+                atoms::error(),
+                NativeFailure::expected(Operation::S3ReadRange, "binary allocation failed")
+                    .payload(),
+            )
+                .encode(env),
+        },
+        Err(failure) => (atoms::error(), failure.payload()).encode(env),
+    }
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn s3_list(env: Env<'_>, config: S3Config, prefix: String) -> Term<'_> {
+    encode_guarded(env, Operation::S3List, || {
+        let cancellation = CancellationToken::default();
+        RemoteObject::new(config)?
+            .list(&prefix, &cancellation)
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .map(NativeMetadata::from)
+                    .collect::<Vec<_>>()
+            })
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn s3_delete(env: Env<'_>, config: S3Config) -> Term<'_> {
+    encode_guarded(env, Operation::S3Delete, || {
+        let cancellation = CancellationToken::default();
+        RemoteObject::new(config)?.delete(&cancellation)?;
+        Ok(atoms::deleted())
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn s3_writer_open(env: Env<'_>, config: S3Config, owner: LocalPid) -> Term<'_> {
+    encode_guarded(env, Operation::S3WriterOpen, || {
+        let cancellation = std::sync::Arc::new(CancellationToken::default());
+        let writer = RemoteObject::new(config)?.open_multipart(cancellation.clone())?;
+        let resource = ResourceArc::new(S3WriterResource {
+            writer: Mutex::new(writer),
+            cancellation,
+        });
+        if env.monitor(&resource, &owner).is_none() {
+            lock_s3_writer(&resource, Operation::S3WriterOpen)?.abort()?;
+            return Err(NativeFailure::expected(
+                Operation::S3WriterOpen,
+                "could not monitor S3 writer owner",
+            ));
+        }
+        Ok(resource)
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn s3_writer_write<'a>(
+    env: Env<'a>,
+    writer: ResourceArc<S3WriterResource>,
+    data: Binary<'a>,
+) -> Term<'a> {
+    encode_guarded(env, Operation::S3WriterWrite, || {
+        let written = Write::write(
+            &mut *lock_s3_writer(&writer, Operation::S3WriterWrite)?,
+            data.as_slice(),
+        )
+        .map_err(|_| NativeFailure::expected(Operation::S3WriterWrite, "S3 write failed"))?;
+        Ok(written)
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn s3_writer_publish(env: Env<'_>, writer: ResourceArc<S3WriterResource>) -> Term<'_> {
+    encode_guarded(env, Operation::S3WriterPublish, || {
+        lock_s3_writer(&writer, Operation::S3WriterPublish)?
+            .publish()
+            .map(NativeMetadata::from)
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn s3_writer_abort(env: Env<'_>, writer: ResourceArc<S3WriterResource>) -> Term<'_> {
+    encode_guarded(env, Operation::S3WriterAbort, || {
+        let aborted = lock_s3_writer(&writer, Operation::S3WriterAbort)?.abort()?;
+        Ok(if aborted {
+            atoms::aborted()
+        } else {
+            atoms::closed()
+        })
+    })
+}
+
 #[rustler::nif]
 fn resource_snapshot(env: Env<'_>) -> Term<'_> {
     encode_guarded(env, Operation::ResourceSnapshot, || {
         let (active_writers, bytes_read) = local::resource_snapshot();
+        let (
+            active_s3_requests,
+            peak_s3_requests,
+            active_multipart_uploads,
+            s3_range_requests,
+            s3_range_bytes,
+        ) = s3::resource_snapshot();
         Ok(ResourceSnapshot {
             active_writers,
             active_readers: reader::active_readers(),
             bytes_read,
+            active_s3_requests,
+            peak_s3_requests,
+            active_multipart_uploads,
+            s3_range_requests,
+            s3_range_bytes,
         })
     })
 }
@@ -416,6 +616,33 @@ fn reader_open(
     encode_guarded(env, Operation::ReaderOpen, || {
         let (reader, fields) = reader::open(
             location(path, allowed_root),
+            options.max_range_bytes,
+            options.batch_size,
+            options.prefetch_depth,
+            options.columns,
+        )?;
+        let resource = ResourceArc::new(reader);
+        if env.monitor(&resource, &owner).is_none() {
+            resource.close()?;
+            return Err(NativeFailure::expected(
+                Operation::ReaderOpen,
+                "could not monitor reader owner",
+            ));
+        }
+        Ok((resource, fields))
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn reader_open_s3(
+    env: Env<'_>,
+    config: S3Config,
+    options: NativeReaderOptions,
+    owner: LocalPid,
+) -> Term<'_> {
+    encode_guarded(env, Operation::ReaderOpen, || {
+        let (reader, fields) = reader::open_s3(
+            config,
             options.max_range_bytes,
             options.batch_size,
             options.prefetch_depth,
@@ -472,6 +699,27 @@ fn parquet_writer_open(
     encode_guarded(env, Operation::ParquetWriterOpen, || {
         let resource =
             ResourceArc::new(writer::open(location(path, allowed_root), schema, options)?);
+        if env.monitor(&resource, &owner).is_none() {
+            resource.abort()?;
+            return Err(NativeFailure::expected(
+                Operation::ParquetWriterOpen,
+                "could not monitor Parquet writer owner",
+            ));
+        }
+        Ok(resource)
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn parquet_writer_open_s3(
+    env: Env<'_>,
+    config: S3Config,
+    schema: Vec<writer::InputField>,
+    options: writer::NativeWriterOptions,
+    owner: LocalPid,
+) -> Term<'_> {
+    encode_guarded(env, Operation::ParquetWriterOpen, || {
+        let resource = ResourceArc::new(writer::open_s3(config, schema, options)?);
         if env.monitor(&resource, &owner).is_none() {
             resource.abort()?;
             return Err(NativeFailure::expected(

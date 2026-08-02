@@ -1,6 +1,6 @@
 # Streaming Parquet writes
 
-`Parquex.write/4` publishes one new local Parquet object from an explicit
+`Parquex.write/4` publishes one new local or S3-compatible Parquet object from an explicit
 `Parquex.Schema` and an enumerable of compatible `Parquex.Batch` values. It asks
 the enumerable for one batch, validates and encodes that batch on a dirty I/O
 scheduler, and only then asks for the next. It never collects the enumerable or

@@ -32,19 +32,11 @@ defmodule Parquex.Writer do
 
   def open(location, %Schema{} = schema, options) when is_list(options) do
     with :ok <- validate_options(options),
-         {:ok, %Location{backend: :local} = location} <- normalize_one(location),
+         {:ok, %Location{} = location} <- normalize_one(location),
          {:ok, settings} <- settings(options),
          {:ok, native_schema} <- native_schema(schema),
          {:ok, resource} <-
-           native_result(
-             Native.parquet_writer_open(
-               location.path,
-               Map.get(location.options, :allowed_root),
-               native_schema,
-               settings,
-               self()
-             )
-           ) do
+           open_native(location, native_schema, settings) do
       {:ok,
        %__MODULE__{
          resource: resource,
@@ -53,7 +45,6 @@ defmodule Parquex.Writer do
          max_batch_rows: settings.max_batch_rows
        }}
     else
-      {:ok, %Location{backend: :s3}} -> unsupported()
       {:ok, _many} -> invalid("write requires one location")
       {:error, _error} = error -> error
       other -> other
@@ -141,6 +132,29 @@ defmodule Parquex.Writer do
 
   defp normalize_one(location), do: Location.normalize(location)
 
+  defp open_native(%Location{backend: :local} = location, native_schema, settings) do
+    native_result(
+      Native.parquet_writer_open(
+        location.path,
+        Map.get(location.options, :allowed_root),
+        native_schema,
+        settings,
+        self()
+      )
+    )
+  end
+
+  defp open_native(%Location{backend: :s3} = location, native_schema, settings),
+    do:
+      native_result(
+        Native.parquet_writer_open_s3(
+          Location.native_s3_config(location),
+          native_schema,
+          settings,
+          self()
+        )
+      )
+
   defp native_schema(schema) do
     native = Schema.to_native(schema)
 
@@ -186,14 +200,5 @@ defmodule Parquex.Writer do
   defp invalid(message) do
     {:error,
      %Error{category: :invalid_argument, operation: :parquet_writer_open, message: message}}
-  end
-
-  defp unsupported do
-    {:error,
-     %Error{
-       category: :unsupported,
-       operation: :parquet_writer_open,
-       message: "S3 Parquet writes are reserved for a later epic"
-     }}
   end
 end

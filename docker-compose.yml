@@ -1,0 +1,37 @@
+name: parquex-rustfs
+
+services:
+  rustfs:
+    image: rustfs/rustfs:1.0.0-beta.4@sha256:f7cb98ef492fa3c3ed0dbd65df3ce2dd205c666e24e7d7234d9402c9ed1001f9
+    command: ["/data"]
+    environment:
+      RUSTFS_ACCESS_KEY: parquex-test-access
+      RUSTFS_SECRET_KEY: parquex-test-secret-not-for-production
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUST_LOG: error
+    ports:
+      - "127.0.0.1:19000:9000"
+      - "127.0.0.1:19001:9001"
+    volumes:
+      - rustfs-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9000/health/ready"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+      start_period: 2s
+
+  rustfs-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set parquex http://rustfs:9000
+        parquex-test-access parquex-test-secret-not-for-production &&
+        mc mb --ignore-existing parquex/parquex-test
+
+volumes:
+  rustfs-data:

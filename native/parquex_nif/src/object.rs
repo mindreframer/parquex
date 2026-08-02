@@ -45,11 +45,13 @@ pub(crate) struct WriteOptions {
 #[derive(Debug, Default)]
 pub(crate) struct CancellationToken {
     cancelled: AtomicBool,
+    notification: tokio::sync::Notify,
 }
 
 impl CancellationToken {
     pub(crate) fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
+        self.notification.notify_waiters();
     }
 
     pub(crate) fn check(&self, operation: crate::Operation) -> Result<(), NativeFailure> {
@@ -58,6 +60,13 @@ impl CancellationToken {
         } else {
             Ok(())
         }
+    }
+
+    pub(crate) async fn cancelled(&self) {
+        if self.cancelled.load(Ordering::Acquire) {
+            return;
+        }
+        self.notification.notified().await;
     }
 }
 

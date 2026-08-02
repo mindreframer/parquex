@@ -1,3 +1,4 @@
+use std::io::{self, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use arrow_array::builder::*;
@@ -16,6 +17,7 @@ use crate::object::{
     CancellationToken, FlushPolicy, ObjectLocation, ObjectMetadata, ObjectStore, StagedWrite,
     SyncPolicy, WriteOptions,
 };
+use crate::s3::{RemoteMultipartWriter, RemoteObject, S3Config};
 use crate::{atoms, Operation};
 
 #[derive(rustler::NifMap)]
@@ -55,15 +57,18 @@ pub(crate) struct WriterStats {
     rows: usize,
     peak_batch_bytes: usize,
     peak_encoder_bytes: usize,
+    multipart_buffer_limit_bytes: usize,
 }
 
 pub(crate) struct ParquetWriterResource {
     state: Mutex<WriterState>,
+    cancellation: Arc<CancellationToken>,
 }
 
 #[rustler::resource_impl]
 impl Resource for ParquetWriterResource {
     fn down(&self, _env: Env<'_>, _pid: LocalPid, _monitor: rustler::Monitor) {
+        self.cancellation.cancel();
         if let Ok(mut state) = self.state.lock() {
             state.abort();
         }
@@ -95,11 +100,45 @@ impl ParquetWriterResource {
 }
 
 struct WriterState {
-    writer: Option<ArrowWriter<LocalWriter>>,
+    writer: Option<ArrowWriter<StagedOutput>>,
     schema: SchemaRef,
     cancellation: Arc<CancellationToken>,
     max_batch_rows: usize,
     stats: WriterStats,
+}
+
+enum StagedOutput {
+    Local(LocalWriter),
+    S3(RemoteMultipartWriter),
+}
+
+impl StagedOutput {
+    fn publish(&mut self) -> Result<ObjectMetadata, NativeFailure> {
+        match self {
+            Self::Local(writer) => writer.publish(),
+            Self::S3(writer) => writer.publish().map(|metadata| ObjectMetadata {
+                path: metadata.key,
+                size: metadata.size,
+                modified_unix_ns: metadata.modified_unix_ns,
+            }),
+        }
+    }
+}
+
+impl Write for StagedOutput {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Local(writer) => Write::write(writer, buffer),
+            Self::S3(writer) => writer.write(buffer),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Local(writer) => writer.flush(),
+            Self::S3(writer) => writer.flush(),
+        }
+    }
 }
 
 impl WriterState {
@@ -182,6 +221,54 @@ pub(crate) fn open(
     fields: Vec<InputField>,
     options: NativeWriterOptions,
 ) -> Result<ParquetWriterResource, NativeFailure> {
+    let cancellation = Arc::new(CancellationToken::default());
+    let flush = flush_policy(options.flush)?;
+    let sync = sync_policy(options.sync)?;
+    let staged = LocalStore.stage(
+        &location,
+        WriteOptions { flush, sync },
+        cancellation.clone(),
+    )?;
+    open_output(
+        StagedOutput::Local(staged),
+        fields,
+        options,
+        cancellation,
+        0,
+    )
+}
+
+pub(crate) fn open_s3(
+    config: S3Config,
+    fields: Vec<InputField>,
+    options: NativeWriterOptions,
+) -> Result<ParquetWriterResource, NativeFailure> {
+    // These local durability controls remain validated for a backend-neutral API,
+    // but S3 durability is governed by successful multipart completion.
+    flush_policy(options.flush)?;
+    sync_policy(options.sync)?;
+    let multipart_buffer_limit_bytes = config
+        .max_in_flight_parts
+        .saturating_add(1)
+        .saturating_mul(config.multipart_part_size);
+    let cancellation = Arc::new(CancellationToken::default());
+    let staged = RemoteObject::new(config)?.open_multipart(cancellation.clone())?;
+    open_output(
+        StagedOutput::S3(staged),
+        fields,
+        options,
+        cancellation,
+        multipart_buffer_limit_bytes,
+    )
+}
+
+fn open_output(
+    staged: StagedOutput,
+    fields: Vec<InputField>,
+    options: NativeWriterOptions,
+    cancellation: Arc<CancellationToken>,
+    multipart_buffer_limit_bytes: usize,
+) -> Result<ParquetWriterResource, NativeFailure> {
     let schema = Arc::new(Schema::new(
         fields
             .iter()
@@ -190,8 +277,6 @@ pub(crate) fn open(
     ));
     let compression = compression(options.compression)?;
     let compression_name = compression_name(options.compression)?;
-    let flush = flush_policy(options.flush)?;
-    let sync = sync_policy(options.sync)?;
     let properties = WriterProperties::builder()
         .set_compression(compression)
         .set_max_row_group_row_count(Some(options.max_row_group_rows))
@@ -212,16 +297,11 @@ pub(crate) fn open(
             },
         ]))
         .build();
-    let cancellation = Arc::new(CancellationToken::default());
-    let staged = LocalStore.stage(
-        &location,
-        WriteOptions { flush, sync },
-        cancellation.clone(),
-    )?;
     let writer = ArrowWriter::try_new(staged, schema.clone(), Some(properties))
         .map_err(|_| encode_failure(Operation::ParquetWriterOpen))?;
 
     Ok(ParquetWriterResource {
+        cancellation: cancellation.clone(),
         state: Mutex::new(WriterState {
             writer: Some(writer),
             schema,
@@ -233,6 +313,7 @@ pub(crate) fn open(
                 rows: 0,
                 peak_batch_bytes: 0,
                 peak_encoder_bytes: 0,
+                multipart_buffer_limit_bytes,
             },
         }),
     })

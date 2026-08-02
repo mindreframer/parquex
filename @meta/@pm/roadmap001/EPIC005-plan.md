@@ -2,13 +2,13 @@
 
 ## Progress
 
-- [ ] Phase 5.1: Implement validated, redacted, bounded S3 configuration.
-- [ ] Phase 5.2: Implement remote head, range, listing, cancellation, and retry behavior.
-- [ ] Phase 5.3: Stream Parquet reads through bounded S3 ranges.
-- [ ] Phase 5.4: Implement bounded create-only multipart Parquet writes and completion.
-- [ ] Phase 5.5: Abort failed work, classify retries/conflicts, and preserve primary errors.
-- [ ] Phase 5.6: Add root `docker-compose.yml` with pinned RustFS and isolated integration coverage.
-- [ ] Phase 5.7: Pass the epic gate and commit the completed S3 scope.
+- [x] Phase 5.1: Implement validated, redacted, bounded S3 configuration.
+- [x] Phase 5.2: Implement remote head, range, listing, cancellation, and retry behavior.
+- [x] Phase 5.3: Stream Parquet reads through bounded S3 ranges.
+- [x] Phase 5.4: Implement bounded create-only multipart Parquet writes and completion.
+- [x] Phase 5.5: Abort failed work, classify retries/conflicts, and preserve primary errors.
+- [x] Phase 5.6: Add root `docker-compose.yml` with pinned RustFS and isolated integration coverage.
+- [x] Phase 5.7: Pass the epic gate and commit the completed S3 scope.
 
 ## Implementation Steps
 
@@ -22,24 +22,24 @@
 
 ## Test Isolation Checklist
 
-- [ ] Every RustFS test uses a unique bucket or prefix and deterministic object keys.
-- [ ] RustFS endpoint and credentials come from documented test-only configuration and are always redacted.
-- [ ] Request assertions use client instrumentation rather than timing assumptions.
-- [ ] Retry and cancellation tests inject deterministic responses and synchronize at known boundaries.
-- [ ] Teardown verifies no test objects, incomplete multipart uploads, Compose containers, or disposable volumes remain under Parquex's control.
-- [ ] Compose startup/readiness uses bounded deadlines, emits logs on failure, and is idempotent.
-- [ ] Memory fixtures are materially larger than configured ranges, batches, parts, and in-flight buffers.
+- [x] Every RustFS test uses a unique bucket or prefix and deterministic object keys.
+- [x] RustFS endpoint and credentials come from documented test-only configuration and are always redacted.
+- [x] Request assertions use client instrumentation rather than timing assumptions.
+- [x] Retry and cancellation tests inject deterministic responses and synchronize at known boundaries.
+- [x] Teardown verifies no test objects, incomplete multipart uploads, Compose containers, or disposable volumes remain under Parquex's control.
+- [x] Compose startup/readiness uses bounded deadlines, emits logs on failure, and is idempotent.
+- [x] Memory fixtures are materially larger than configured ranges, batches, parts, and in-flight buffers.
 
 ## Quality Gate
 
-- [ ] S3 configuration, validation, standard/explicit credential, and redaction tests pass.
-- [ ] Head, bounded range, explicit-prefix listing, retry, missing, and forbidden-object tests pass.
-- [ ] Compressed streaming read, projection, create-only multipart write, destination-conflict preservation, local/S3 parity, and memory-bound tests pass.
-- [ ] Cancellation, active-request cleanup, multipart abort, and cleanup-error reporting tests pass.
-- [ ] The pinned RustFS service in `docker-compose.yml` passes readiness, isolation, diagnostics, and teardown checks without depending on `../RUSTFS_TOOL`.
-- [ ] `bin/qa_check.sh` starts RustFS, runs the integration suite, cleans it up, and succeeds before the epic commit.
-- [ ] Git diff is focused on EPIC005 and contains no router, cache, filtering, SQL, or table-format behavior.
-- [ ] Commit title and informative body follow the commit rule.
+- [x] S3 configuration, validation, standard/explicit credential, and redaction tests pass.
+- [x] Head, bounded range, explicit-prefix listing, retry, missing, and forbidden-object tests pass.
+- [x] Compressed streaming read, projection, create-only multipart write, destination-conflict preservation, local/S3 parity, and memory-bound tests pass.
+- [x] Cancellation, active-request cleanup, multipart abort, and cleanup-error reporting tests pass.
+- [x] The pinned RustFS service in `docker-compose.yml` passes readiness, isolation, diagnostics, and teardown checks without depending on `../RUSTFS_TOOL`.
+- [x] `bin/qa_check.sh` starts RustFS, runs the integration suite, cleans it up, and succeeds before the epic commit.
+- [x] Git diff is focused on EPIC005 and contains no router, cache, filtering, SQL, or table-format behavior.
+- [x] Commit title and informative body follow the commit rule.
 
 ## Commit Rule
 

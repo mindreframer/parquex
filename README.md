@@ -5,10 +5,11 @@ S3-compatible object storage. Its primary interface is pull-based and
 backpressured: object size and result cardinality must not determine peak memory
 usage.
 
-The local object layer supports bounded ranges and safely published new
-objects. Local Parquet reads and writes are lazy and bounded by explicit batch,
-prefetch, range, row-group, and page limits. S3 I/O remains roadmap work. The
-native diagnostic verifies the packaged Rustler boundary:
+The object layer supports local files and S3-compatible storage through the
+same bounded range and create-only publication contracts. Parquet reads and
+writes are lazy and bounded by explicit batch, prefetch, range, request,
+multipart, row-group, and page limits. The native diagnostic verifies the
+packaged Rustler boundary:
 
 ```elixir
 {:ok, %{api_version: 1}} = Parquex.native_status()
@@ -46,8 +47,32 @@ New immutable objects accept an enumerable of bounded iodata chunks:
 Writers use a unique sibling temporary file and create-only publication. An
 existing destination returns `:conflict` without changing its bytes. Explicit
 cancellation, producer failure, or writer-owner exit removes owned staging.
-`s3://` locations are validated and redacted but remain non-operational until
-the S3 epic.
+
+## S3-compatible object storage
+
+Every S3 descriptor owns its endpoint, credentials, retry, timeout, range,
+request-concurrency, and multipart bounds:
+
+```elixir
+{:ok, remote} =
+  Parquex.Location.new("s3://analytics/events/part-001.parquet",
+    endpoint: "https://objects.example.com",
+    region: "us-east-1",
+    path_style: true,
+    credential_provider: :standard,
+    max_range_bytes: 1_048_576,
+    max_request_concurrency: 4,
+    multipart_part_size: 8 * 1024 * 1024,
+    max_in_flight_parts: 2
+  )
+
+{:ok, stream} = Parquex.scan(remote, columns: ["event_id"], batch_size: 1_024)
+```
+
+Explicit credentials are also supported and are redacted from descriptor
+inspection and errors. S3 writes upload bounded multipart staging objects and
+publish create-only after the Parquet footer closes. See
+[`docs/s3.md`](docs/s3.md) for the complete contract and RustFS workflow.
 
 ## Streaming Parquet reads
 
@@ -114,8 +139,8 @@ schema = %Parquex.Schema{
 ```
 
 The destination is create-only: a conflict preserves the existing bytes.
-Producer failure, cancellation, or owner exit removes the unique sibling staging
-file. See [`docs/parquet-writes.md`](docs/parquet-writes.md) for codecs, the
+Producer failure, cancellation, or owner exit removes owned local or remote
+staging. See [`docs/parquet-writes.md`](docs/parquet-writes.md) for codecs, the
 empty-input policy, incremental writer operations, and memory limits.
 
 ## Architecture
@@ -137,9 +162,10 @@ quality gate from the repository root:
 bin/qa_check.sh
 ```
 
-The default gate requires no network service or credentials. Future RustFS
-integration tests use the `:rustfs_integration` tag and remain excluded until
-the project-owned environment is added.
+The gate starts the pinned project-owned RustFS Compose service, creates its
+test bucket, runs isolated `:rustfs_integration` coverage, captures diagnostics
+on failure, and always removes its containers and volume. Running `mix test`
+directly excludes those tests unless `PARQUEX_RUSTFS_INTEGRATION=1` is set.
 
 ## Installation
 

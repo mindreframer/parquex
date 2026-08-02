@@ -10,7 +10,7 @@ defmodule Parquex.Reader do
   @spec open(Location.t(), keyword()) :: {:ok, Parquex.Stream.t()} | {:error, Error.t()}
   def open(location, options) when is_list(options) do
     with true <- Keyword.keyword?(options) || invalid_options(),
-         {:ok, %Location{} = location} <- normalize_local(location),
+         {:ok, %Location{} = location} <- normalize_one(location),
          :ok <- validate_keys(options),
          {:ok, batch_size} <- positive_integer(options, :batch_size, @default_batch_size),
          {:ok, prefetch_depth} <-
@@ -18,19 +18,12 @@ defmodule Parquex.Reader do
          :ok <- validate_prefetch(prefetch_depth),
          {:ok, columns} <- validate_columns(Keyword.get(options, :columns)),
          {:ok, {resource, native_fields}} <-
-           native_result(
-             Native.reader_open(
-               location.path,
-               Map.get(location.options, :allowed_root),
-               %{
-                 max_range_bytes: Location.max_range_bytes(location),
-                 batch_size: batch_size,
-                 prefetch_depth: prefetch_depth,
-                 columns: columns
-               },
-               self()
-             )
-           ),
+           open_native(location, %{
+             max_range_bytes: Location.max_range_bytes(location),
+             batch_size: batch_size,
+             prefetch_depth: prefetch_depth,
+             columns: columns
+           }),
          {:ok, schema} <- Schema.from_native(native_fields) do
       {:ok, Parquex.Stream.new(resource, schema)}
     end
@@ -38,14 +31,27 @@ defmodule Parquex.Reader do
 
   def open(_location, _options), do: invalid_options()
 
-  defp normalize_local(location) do
+  defp normalize_one(location) do
     case Location.normalize(location) do
-      {:ok, %Location{backend: :local} = normalized} -> {:ok, normalized}
-      {:ok, %Location{backend: :s3}} -> unsupported()
+      {:ok, %Location{} = normalized} -> {:ok, normalized}
       {:ok, _many} -> invalid_argument("scan requires one location")
       {:error, _error} = error -> error
     end
   end
+
+  defp open_native(%Location{backend: :local} = location, options) do
+    native_result(
+      Native.reader_open(
+        location.path,
+        Map.get(location.options, :allowed_root),
+        options,
+        self()
+      )
+    )
+  end
+
+  defp open_native(%Location{backend: :s3} = location, options),
+    do: native_result(Native.reader_open_s3(Location.native_s3_config(location), options, self()))
 
   defp validate_keys(options) do
     if Keyword.keys(options) -- [:batch_size, :prefetch_depth, :columns] == [],
@@ -85,14 +91,5 @@ defmodule Parquex.Reader do
 
   defp invalid_argument(message) do
     {:error, %Error{category: :invalid_argument, operation: :reader_open, message: message}}
-  end
-
-  defp unsupported do
-    {:error,
-     %Error{
-       category: :unsupported,
-       operation: :reader_open,
-       message: "S3 Parquet reads are reserved for a later epic"
-     }}
   end
 end

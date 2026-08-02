@@ -2,12 +2,11 @@ defmodule Parquex do
   @moduledoc """
   Streams bounded columnar batches to and from immutable Parquet objects.
 
-  Streaming is the primary Parquex interface. Local Parquet scans produce lazy,
+  Streaming is the primary Parquex interface. Parquet scans produce lazy,
   projected `Parquex.Batch` values through the backend-neutral object layer.
-  `Parquex.Object` also provides bounded local ranges and staged, create-only
-  local publication. Parquet writes consume compatible bounded batches and
-  publish complete new local objects. Later roadmap epics activate S3-compatible
-  locations.
+  `Parquex.Object` also provides bounded local/S3 ranges and staged, create-only
+  publication. Parquet writes consume compatible bounded batches and publish
+  complete new local or S3 objects.
 
   The diagnostic functions in this module verify that the packaged native
   boundary can load and that native failures are translated into stable Elixir
@@ -24,7 +23,7 @@ defmodule Parquex do
           {:ok, Parquex.Stream.t()} | {:error, Parquex.Error.t()}
   def scan(location, options \\ []), do: Parquex.Reader.open(location, options)
 
-  @doc "Inspects a local Parquet schema using bounded metadata reads."
+  @doc "Inspects a Parquet schema using bounded local or S3 metadata reads."
   @spec schema(Parquex.Location.t() | Path.t() | URI.t(), keyword()) ::
           {:ok, Parquex.Schema.t()} | {:error, Parquex.Error.t()}
   def schema(location, options \\ []) do
@@ -35,7 +34,7 @@ defmodule Parquex do
     end
   end
 
-  @doc "Streams bounded batches into one new immutable local Parquet object."
+  @doc "Streams bounded batches into one new immutable local or S3 Parquet object."
   @spec write(
           Parquex.Location.t() | Path.t() | URI.t(),
           Parquex.Schema.t(),

@@ -23,6 +23,7 @@ use rustler::{Encoder, Env, OwnedBinary, Resource, Term};
 use crate::error::{Category, NativeFailure};
 use crate::local::LocalStore;
 use crate::object::{ByteRange, CancellationToken, ObjectLocation, ObjectStore};
+use crate::s3::{RemoteObject, S3Config};
 use crate::{atoms, Operation};
 
 static ACTIVE_READERS: AtomicUsize = AtomicUsize::new(0);
@@ -44,8 +45,37 @@ impl RangeMetrics {
 }
 
 #[derive(Clone, Debug)]
+enum ChunkBackend {
+    Local(ObjectLocation),
+    S3(Box<RemoteObject>),
+}
+
+impl ChunkBackend {
+    fn read_range(
+        &self,
+        offset: u64,
+        length: usize,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<u8>, NativeFailure> {
+        match self {
+            Self::Local(location) => LocalStore.read_range(
+                location,
+                ByteRange {
+                    offset,
+                    length: length as u64,
+                },
+                cancellation,
+            ),
+            Self::S3(object) => {
+                object.read_range(offset, length, cancellation, Operation::ReaderNext)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 struct ObjectChunkReader {
-    location: ObjectLocation,
+    backend: ChunkBackend,
     size: u64,
     max_range_bytes: usize,
     cancellation: Arc<CancellationToken>,
@@ -85,15 +115,9 @@ impl ChunkReader for ObjectChunkReader {
         if end > self.size {
             return Err(ParquetError::EOF("range exceeds the object".to_owned()));
         }
-        let bytes = LocalStore
-            .read_range(
-                &self.location,
-                ByteRange {
-                    offset: start,
-                    length: length as u64,
-                },
-                &self.cancellation,
-            )
+        let bytes = self
+            .backend
+            .read_range(start, length, &self.cancellation)
             .map_err(parquet_object_error)?;
         if bytes.len() != length {
             return Err(ParquetError::EOF("range was truncated".to_owned()));
@@ -119,15 +143,10 @@ impl Read for ObjectCursor {
             .len()
             .min(self.reader.max_range_bytes)
             .min(usize::try_from(available).unwrap_or(usize::MAX));
-        let bytes = LocalStore
-            .read_range(
-                &self.reader.location,
-                ByteRange {
-                    offset: self.position,
-                    length: length as u64,
-                },
-                &self.reader.cancellation,
-            )
+        let bytes = self
+            .reader
+            .backend
+            .read_range(self.position, length, &self.reader.cancellation)
             .map_err(object_io_error)?;
         buffer[..bytes.len()].copy_from_slice(&bytes);
         self.position += bytes.len() as u64;
@@ -146,11 +165,13 @@ fn object_io_error(_error: NativeFailure) -> io::Error {
 
 pub(crate) struct ReaderResource {
     state: Mutex<ReaderState>,
+    cancellation: Arc<CancellationToken>,
 }
 
 #[rustler::resource_impl]
 impl Resource for ReaderResource {
     fn down(&self, _env: Env<'_>, _pid: rustler::LocalPid, _monitor: rustler::Monitor) {
+        self.cancellation.cancel();
         if let Ok(mut state) = self.state.lock() {
             state.close();
         }
@@ -335,10 +356,56 @@ pub(crate) fn open(
             operation: Operation::ReaderOpen,
             ..error
         })?;
+    open_backend(
+        ChunkBackend::Local(location),
+        metadata.size,
+        cancellation,
+        max_range_bytes,
+        batch_size,
+        prefetch_depth,
+        columns,
+    )
+}
+
+pub(crate) fn open_s3(
+    config: S3Config,
+    max_range_bytes: usize,
+    batch_size: usize,
+    prefetch_depth: usize,
+    columns: Vec<String>,
+) -> Result<(ReaderResource, Vec<NativeField>), NativeFailure> {
+    let cancellation = Arc::new(CancellationToken::default());
+    let object = RemoteObject::new(config)?;
+    let metadata = object
+        .head(&cancellation, Operation::ReaderOpen)
+        .map_err(|error| NativeFailure {
+            operation: Operation::ReaderOpen,
+            ..error
+        })?;
+    open_backend(
+        ChunkBackend::S3(Box::new(object)),
+        metadata.size,
+        cancellation,
+        max_range_bytes,
+        batch_size,
+        prefetch_depth,
+        columns,
+    )
+}
+
+fn open_backend(
+    backend: ChunkBackend,
+    size: u64,
+    cancellation: Arc<CancellationToken>,
+    max_range_bytes: usize,
+    batch_size: usize,
+    prefetch_depth: usize,
+    columns: Vec<String>,
+) -> Result<(ReaderResource, Vec<NativeField>), NativeFailure> {
     let metrics = Arc::new(RangeMetrics::default());
     let chunk_reader = ObjectChunkReader {
-        location,
-        size: metadata.size,
+        backend,
+        size,
         max_range_bytes,
         cancellation: cancellation.clone(),
         metrics: metrics.clone(),
@@ -398,6 +465,7 @@ pub(crate) fn open(
     ACTIVE_READERS.fetch_add(1, Ordering::Relaxed);
     Ok((
         ReaderResource {
+            cancellation: cancellation.clone(),
             state: Mutex::new(ReaderState {
                 reader: Some(reader),
                 queue: VecDeque::with_capacity(prefetch_depth),

@@ -3,15 +3,30 @@ defmodule Parquex.Location do
   A validated, backend-neutral descriptor for one immutable object or prefix.
 
   Local paths and `file://` URIs normalize to absolute local paths. `s3://`
-  descriptors are validated and reserved for the S3 epic; object operations on
-  them currently return `:unsupported`. Every descriptor owns its options, so
-  normalizing a list preserves caller order and never installs global backend
+  descriptors carry independent endpoint, credential-provider, retry, timeout,
+  range, concurrency, and multipart bounds. Every descriptor owns its options,
+  so normalizing a list preserves caller order and never installs global backend
   state.
 
   Inspection redacts credential-shaped and explicitly marked secret options.
   """
 
   @default_max_range_bytes 8 * 1024 * 1024
+  @default_s3_options %{
+    region: "us-east-1",
+    endpoint: nil,
+    path_style: false,
+    tls: true,
+    request_timeout_ms: 30_000,
+    max_retries: 3,
+    credential_provider: :standard,
+    max_request_concurrency: 4,
+    multipart_part_size: 8 * 1024 * 1024,
+    max_in_flight_parts: 2,
+    create_only: :required
+  }
+  @s3_keys Map.keys(@default_s3_options) ++
+             [:max_range_bytes, :access_key_id, :secret_access_key, :session_token]
   @credential_keys ~w(access_key access_key_id authorization credential credentials password secret secret_access_key session_token token)a
 
   @enforce_keys [:backend, :uri]
@@ -85,6 +100,36 @@ defmodule Parquex.Location do
   end
 
   @doc false
+  @spec s3_bucket(t()) :: String.t()
+  def s3_bucket(%__MODULE__{backend: :s3, uri: uri}), do: uri.host
+
+  @doc false
+  @spec s3_key(t()) :: String.t()
+  def s3_key(%__MODULE__{backend: :s3, uri: uri}), do: String.trim_leading(uri.path || "", "/")
+
+  @doc false
+  @spec native_s3_config(t()) :: map()
+  def native_s3_config(%__MODULE__{backend: :s3, options: options} = location) do
+    %{
+      bucket: s3_bucket(location),
+      key: s3_key(location),
+      endpoint: options.endpoint,
+      region: options.region,
+      path_style: options.path_style,
+      tls: options.tls,
+      request_timeout_ms: options.request_timeout_ms,
+      max_retries: options.max_retries,
+      credential_provider: options.credential_provider,
+      access_key_id: Map.get(options, :access_key_id),
+      secret_access_key: Map.get(options, :secret_access_key),
+      session_token: Map.get(options, :session_token),
+      max_request_concurrency: options.max_request_concurrency,
+      multipart_part_size: options.multipart_part_size,
+      max_in_flight_parts: options.max_in_flight_parts
+    }
+  end
+
+  @doc false
   @spec options_with_secrets(t()) :: map()
   def options_with_secrets(%__MODULE__{options: options, secret_keys: secret_keys}) do
     Map.put(options, :secret_keys, MapSet.to_list(secret_keys))
@@ -131,7 +176,8 @@ defmodule Parquex.Location do
   defp build_s3_uri(uri, options) do
     if is_binary(uri.host) and uri.host != "" and is_nil(uri.userinfo) and is_nil(uri.port) and
          is_nil(uri.query) and is_nil(uri.fragment) do
-      with {:ok, options, secret_keys} <- normalize_options(options) do
+      with {:ok, options, secret_keys} <- normalize_options(options),
+           {:ok, options} <- normalize_s3_options(options) do
         normalized = %URI{scheme: "s3", host: String.downcase(uri.host), path: uri.path || ""}
 
         {:ok,
@@ -195,6 +241,140 @@ defmodule Parquex.Location do
 
   defp normalize_secret_keys(_keys),
     do: invalid_location("secret_keys must be a list of option names")
+
+  defp normalize_s3_options(options) do
+    with :ok <- validate_s3_keys(options),
+         {:ok, endpoint} <- normalize_endpoint(Map.get(options, :endpoint)),
+         {:ok, region} <- non_empty_string(Map.get(options, :region, "us-east-1"), :region),
+         {:ok, path_style} <- boolean_option(Map.get(options, :path_style, false), :path_style),
+         {:ok, tls} <- boolean_option(Map.get(options, :tls, true), :tls),
+         :ok <- validate_endpoint_tls(endpoint, tls),
+         {:ok, timeout} <-
+           bounded_positive(
+             Map.get(options, :request_timeout_ms, 30_000),
+             300_000,
+             :request_timeout_ms
+           ),
+         {:ok, retries} <-
+           bounded_non_negative(Map.get(options, :max_retries, 3), 10, :max_retries),
+         {:ok, provider} <-
+           credential_provider(Map.get(options, :credential_provider, :standard), options),
+         {:ok, request_concurrency} <-
+           bounded_positive(
+             Map.get(options, :max_request_concurrency, 4),
+             64,
+             :max_request_concurrency
+           ),
+         {:ok, part_size} <-
+           multipart_part_size(Map.get(options, :multipart_part_size, 8 * 1024 * 1024)),
+         {:ok, in_flight} <-
+           bounded_positive(Map.get(options, :max_in_flight_parts, 2), 16, :max_in_flight_parts),
+         :ok <- validate_create_only(Map.get(options, :create_only, :required)) do
+      {:ok,
+       options
+       |> Map.merge(@default_s3_options)
+       |> Map.merge(%{
+         endpoint: endpoint,
+         region: region,
+         path_style: path_style,
+         tls: tls,
+         request_timeout_ms: timeout,
+         max_retries: retries,
+         credential_provider: provider,
+         max_request_concurrency: request_concurrency,
+         multipart_part_size: part_size,
+         max_in_flight_parts: in_flight,
+         create_only: :required
+       })}
+    end
+  end
+
+  defp validate_s3_keys(options) do
+    if Map.keys(options) -- @s3_keys == [],
+      do: :ok,
+      else: invalid_location("unknown S3 location option")
+  end
+
+  defp normalize_endpoint(nil), do: {:ok, nil}
+
+  defp normalize_endpoint(endpoint) when is_binary(endpoint) do
+    uri = URI.parse(endpoint)
+
+    if uri.scheme in ["http", "https"] and is_binary(uri.host) and uri.host != "" and
+         is_nil(uri.userinfo) and is_nil(uri.query) and is_nil(uri.fragment) and
+         uri.path in [nil, "", "/"] do
+      {:ok, endpoint |> String.trim_trailing("/")}
+    else
+      invalid_location("endpoint must be an HTTP(S) origin without credentials")
+    end
+  end
+
+  defp normalize_endpoint(_endpoint), do: invalid_location("endpoint must be an HTTP(S) origin")
+
+  defp validate_endpoint_tls(nil, true), do: :ok
+
+  defp validate_endpoint_tls(nil, false),
+    do: invalid_location("tls can be false only with an HTTP endpoint")
+
+  defp validate_endpoint_tls("https://" <> _rest, true), do: :ok
+  defp validate_endpoint_tls("http://" <> _rest, false), do: :ok
+
+  defp validate_endpoint_tls(_endpoint, _tls),
+    do: invalid_location("endpoint scheme and tls option disagree")
+
+  defp non_empty_string(value, _key) when is_binary(value) and value != "", do: {:ok, value}
+  defp non_empty_string(_value, key), do: invalid_location("#{key} must be a non-empty string")
+
+  defp boolean_option(value, _key) when is_boolean(value), do: {:ok, value}
+  defp boolean_option(_value, key), do: invalid_location("#{key} must be a boolean")
+
+  defp bounded_positive(value, max, _key) when is_integer(value) and value > 0 and value <= max,
+    do: {:ok, value}
+
+  defp bounded_positive(_value, _max, key),
+    do: invalid_location("#{key} must be a positive bounded integer")
+
+  defp bounded_non_negative(value, max, _key)
+       when is_integer(value) and value >= 0 and value <= max,
+       do: {:ok, value}
+
+  defp bounded_non_negative(_value, _max, key),
+    do: invalid_location("#{key} must be a bounded non-negative integer")
+
+  defp credential_provider(:standard, options) do
+    if Enum.any?(
+         [:access_key_id, :secret_access_key, :session_token],
+         &Map.has_key?(options, &1)
+       ),
+       do: invalid_location("explicit credentials require credential_provider: :explicit"),
+       else: {:ok, :standard}
+  end
+
+  defp credential_provider(:explicit, options) do
+    with {:ok, _access} <- non_empty_string(Map.get(options, :access_key_id), :access_key_id),
+         {:ok, _secret} <-
+           non_empty_string(Map.get(options, :secret_access_key), :secret_access_key),
+         :ok <- optional_string(Map.get(options, :session_token), :session_token) do
+      {:ok, :explicit}
+    end
+  end
+
+  defp credential_provider(_provider, _options),
+    do: invalid_location("credential_provider must be :standard or :explicit")
+
+  defp optional_string(nil, _key), do: :ok
+  defp optional_string(value, _key) when is_binary(value) and value != "", do: :ok
+  defp optional_string(_value, key), do: invalid_location("#{key} must be a non-empty string")
+
+  defp multipart_part_size(value)
+       when is_integer(value) and value >= 5 * 1024 * 1024 and value <= 512 * 1024 * 1024,
+       do: {:ok, value}
+
+  defp multipart_part_size(_value),
+    do: invalid_location("multipart_part_size must be between 5 MiB and 512 MiB")
+
+  defp validate_create_only(:required), do: :ok
+  defp validate_create_only(_value), do: invalid_location("create_only must be :required")
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)

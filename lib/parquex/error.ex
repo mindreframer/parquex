@@ -30,19 +30,22 @@ defmodule Parquex.Error do
 
   @doc false
   @spec from_native(map()) :: t()
-  def from_native(%{
-        category: category,
-        operation: operation,
-        message: message,
-        retryable: retryable
-      })
+  def from_native(
+        %{
+          category: category,
+          operation: operation,
+          message: message,
+          retryable: retryable
+        } = payload
+      )
       when is_atom(category) and is_atom(operation) and is_binary(message) and
              is_boolean(retryable) do
     %__MODULE__{
       category: normalize_category(category),
       operation: operation,
       message: message,
-      retryable: retryable
+      retryable: retryable,
+      details: safe_details(Map.get(payload, :details, %{}))
     }
   end
 
@@ -72,4 +75,7 @@ defmodule Parquex.Error do
        do: category
 
   defp normalize_category(_category), do: :unknown
+
+  defp safe_details(details) when is_map(details), do: details
+  defp safe_details(_details), do: %{}
 end

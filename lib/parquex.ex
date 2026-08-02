@@ -2,10 +2,10 @@ defmodule Parquex do
   @moduledoc """
   Streams bounded columnar batches to and from immutable Parquet objects.
 
-  Streaming is the primary Parquex interface. Later roadmap epics add lazy
-  reads and bounded writes for independently configured local and S3-compatible
-  locations. The native foundation established here intentionally performs no
-  storage or Parquet work.
+  Streaming is the primary Parquex interface. `Parquex.Object` currently
+  provides the backend-neutral foundation with bounded local ranges and staged,
+  create-only local publication. Later roadmap epics add Parquet batch streams
+  and activate S3-compatible locations.
 
   The diagnostic functions in this module verify that the packaged native
   boundary can load and that native failures are translated into stable Elixir

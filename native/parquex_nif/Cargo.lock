@@ -1226,6 +1226,7 @@ dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-schema",
+ "arrow-select",
  "bytes",
  "futures-util",
  "object_store",

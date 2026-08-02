@@ -2,13 +2,13 @@
 
 ## Progress
 
-- [ ] Phase 6.1: Define immutable append conventions.
-- [ ] Phase 6.2: Add lightweight typed predicates.
-- [ ] Phase 6.3: Implement safe row-group pruning.
-- [ ] Phase 6.4: Apply row-level correctness filtering.
-- [ ] Phase 6.5: Support mixed backend inputs.
-- [ ] Phase 6.6: Prove rewrite compatibility.
-- [ ] Phase 6.7: Pass the epic gate.
+- [x] Phase 6.1: Define immutable append conventions.
+- [x] Phase 6.2: Add lightweight typed predicates.
+- [x] Phase 6.3: Implement safe row-group pruning.
+- [x] Phase 6.4: Apply row-level correctness filtering.
+- [x] Phase 6.5: Support mixed backend inputs.
+- [x] Phase 6.6: Prove rewrite compatibility.
+- [x] Phase 6.7: Pass the epic gate.
 
 ## Implementation Steps
 
@@ -22,23 +22,23 @@
 
 ## Test Isolation Checklist
 
-- [ ] Fixtures use unique temporary local paths, S3 prefixes, and deterministic object names.
-- [ ] Predicate fixtures control row-group values, nulls, and statistics states without relying on incidental encoder output.
-- [ ] Pruning metrics are asserted separately from row-level result correctness.
-- [ ] RustFS state and test credentials are isolated, redacted, and cleaned after every scenario.
-- [ ] Concurrency tests use explicit barriers and bounds rather than timing sleeps.
-- [ ] Rewrite tests preserve inputs and clean newly created outputs on completion or failure.
+- [x] Fixtures use unique temporary local paths, S3 prefixes, and deterministic object names.
+- [x] Predicate fixtures control row-group values, nulls, and statistics states without relying on incidental encoder output.
+- [x] Pruning metrics are asserted separately from row-level result correctness.
+- [x] RustFS state and test credentials are isolated, redacted, and cleaned after every scenario.
+- [x] Concurrency tests use explicit barriers and bounds rather than timing sleeps.
+- [x] Rewrite tests preserve inputs and clean newly created outputs on completion or failure.
 
 ## Quality Gate
 
-- [ ] Immutable naming and complete-or-absent publication tests pass for local and S3 outputs.
-- [ ] Offset filtering passes with usable, missing, and inconclusive statistics.
-- [ ] Pruning never omits matches and demonstrably reduces eligible row-group/range reads.
-- [ ] Mixed-source ordering, cancellation, memory, and source-concurrency tests pass.
-- [ ] The bounded rewrite publishes a readable output without materializing all rows or deleting inputs.
-- [ ] Deferred DataFusion/SQL, table formats, storage blending policy, and compaction orchestration remain absent.
-- [ ] `bin/qa_check.sh` succeeds and the diff contains only EPIC006 work.
-- [ ] Commit title and informative body follow the commit rule.
+- [x] Immutable naming and complete-or-absent publication tests pass for local and S3 outputs.
+- [x] Offset filtering passes with usable, missing, and inconclusive statistics.
+- [x] Pruning never omits matches and demonstrably reduces eligible row-group/range reads.
+- [x] Mixed-source ordering, cancellation, memory, and source-concurrency tests pass.
+- [x] The bounded rewrite publishes a readable output without materializing all rows or deleting inputs.
+- [x] Deferred DataFusion/SQL, table formats, storage blending policy, and compaction orchestration remain absent.
+- [x] `bin/qa_check.sh` succeeds and the diff contains only EPIC006 work.
+- [x] Commit title and informative body follow the commit rule.
 
 ## Commit Rule
 

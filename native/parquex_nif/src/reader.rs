@@ -12,12 +12,14 @@ use arrow_array::{
     ListArray, NullArray, PrimitiveArray, RecordBatch, StringArray, StructArray,
 };
 use arrow_schema::{DataType, Field, TimeUnit};
+use arrow_select::filter::filter_record_batch;
 use bytes::Bytes;
 use parquet::arrow::arrow_reader::{ParquetRecordBatchReader, ParquetRecordBatchReaderBuilder};
 use parquet::arrow::ProjectionMask;
 use parquet::basic::Compression;
 use parquet::errors::{ParquetError, Result as ParquetResult};
 use parquet::file::reader::{ChunkReader, Length};
+use parquet::file::statistics::Statistics;
 use rustler::{Encoder, Env, OwnedBinary, Resource, Term};
 
 use crate::error::{Category, NativeFailure};
@@ -212,6 +214,10 @@ struct ReaderState {
     row_groups: usize,
     compressions: Vec<String>,
     writer_options: HashMap<String, String>,
+    predicate: Option<CompiledPredicate>,
+    output_indices: Vec<usize>,
+    row_groups_read: usize,
+    row_groups_skipped: usize,
 }
 
 impl ReaderState {
@@ -229,6 +235,14 @@ impl ReaderState {
                 .next();
             match next {
                 Some(Ok(batch)) => {
+                    let batch = apply_predicate_and_projection(
+                        batch,
+                        self.predicate.as_ref(),
+                        &self.output_indices,
+                    )?;
+                    if batch.num_rows() == 0 {
+                        continue;
+                    }
                     self.current_buffered_bytes += batch.get_array_memory_size();
                     self.queue.push_back(batch);
                     self.peak_buffered_bytes =
@@ -279,6 +293,8 @@ impl ReaderState {
             range_bytes: self.range_metrics.bytes.load(Ordering::Relaxed),
             max_range_bytes: self.range_metrics.max_request_bytes.load(Ordering::Relaxed),
             row_groups: self.row_groups,
+            row_groups_read: self.row_groups_read,
+            row_groups_skipped: self.row_groups_skipped,
             compressions: self.compressions.clone(),
             writer_options: self.writer_options.clone(),
         }
@@ -302,6 +318,8 @@ pub(crate) struct ReaderStats {
     range_bytes: u64,
     max_range_bytes: u64,
     row_groups: usize,
+    row_groups_read: usize,
+    row_groups_skipped: usize,
     compressions: Vec<String>,
     writer_options: HashMap<String, String>,
 }
@@ -311,6 +329,63 @@ pub(crate) struct NativeField {
     name: String,
     nullable: bool,
     data_type: NativeDataType,
+}
+
+#[derive(rustler::NifMap)]
+pub(crate) struct NativePredicate {
+    column: String,
+    operator: rustler::Atom,
+    literal: NativeLiteral,
+}
+
+#[derive(rustler::NifMap)]
+struct NativeLiteral {
+    kind: rustler::Atom,
+    integer: Option<i64>,
+    float: Option<f64>,
+    string: Option<String>,
+    boolean: Option<bool>,
+}
+
+#[derive(Clone, Copy)]
+enum PredicateOperator {
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+    Eq,
+}
+
+#[derive(Clone)]
+enum PredicateLiteral {
+    Integer(i64),
+    Float(f64),
+    Utf8(String),
+    Boolean(bool),
+}
+
+#[derive(Clone)]
+struct CompiledPredicate {
+    column: String,
+    column_index: usize,
+    root_index: usize,
+    operator: PredicateOperator,
+    literal: PredicateLiteral,
+    prune_kind: Option<PruneKind>,
+}
+
+#[derive(Clone, Copy)]
+enum PruneKind {
+    Int32,
+    Int64,
+}
+
+struct ReaderOpenSettings {
+    max_range_bytes: usize,
+    batch_size: usize,
+    prefetch_depth: usize,
+    columns: Vec<String>,
+    predicate: Option<NativePredicate>,
 }
 
 #[derive(rustler::NifMap)]
@@ -348,6 +423,7 @@ pub(crate) fn open(
     batch_size: usize,
     prefetch_depth: usize,
     columns: Vec<String>,
+    predicate: Option<NativePredicate>,
 ) -> Result<(ReaderResource, Vec<NativeField>), NativeFailure> {
     let cancellation = Arc::new(CancellationToken::default());
     let metadata = LocalStore
@@ -360,10 +436,13 @@ pub(crate) fn open(
         ChunkBackend::Local(location),
         metadata.size,
         cancellation,
-        max_range_bytes,
-        batch_size,
-        prefetch_depth,
-        columns,
+        ReaderOpenSettings {
+            max_range_bytes,
+            batch_size,
+            prefetch_depth,
+            columns,
+            predicate,
+        },
     )
 }
 
@@ -373,6 +452,7 @@ pub(crate) fn open_s3(
     batch_size: usize,
     prefetch_depth: usize,
     columns: Vec<String>,
+    predicate: Option<NativePredicate>,
 ) -> Result<(ReaderResource, Vec<NativeField>), NativeFailure> {
     let cancellation = Arc::new(CancellationToken::default());
     let object = RemoteObject::new(config)?;
@@ -386,10 +466,13 @@ pub(crate) fn open_s3(
         ChunkBackend::S3(Box::new(object)),
         metadata.size,
         cancellation,
-        max_range_bytes,
-        batch_size,
-        prefetch_depth,
-        columns,
+        ReaderOpenSettings {
+            max_range_bytes,
+            batch_size,
+            prefetch_depth,
+            columns,
+            predicate,
+        },
     )
 }
 
@@ -397,11 +480,15 @@ fn open_backend(
     backend: ChunkBackend,
     size: u64,
     cancellation: Arc<CancellationToken>,
-    max_range_bytes: usize,
-    batch_size: usize,
-    prefetch_depth: usize,
-    columns: Vec<String>,
+    settings: ReaderOpenSettings,
 ) -> Result<(ReaderResource, Vec<NativeField>), NativeFailure> {
+    let ReaderOpenSettings {
+        max_range_bytes,
+        batch_size,
+        prefetch_depth,
+        columns,
+        predicate,
+    } = settings;
     let metrics = Arc::new(RangeMetrics::default());
     let chunk_reader = ObjectChunkReader {
         backend,
@@ -442,23 +529,60 @@ fn open_backend(
         .iter()
         .map(|field| native_field(field))
         .collect::<Result<Vec<_>, _>>()?;
-    let projection_indices = projection_indices(all_fields, &columns)?;
+    let requested_indices = projection_indices(all_fields, &columns)?;
+    let mut predicate = predicate
+        .map(|predicate| compile_predicate(predicate, all_fields))
+        .transpose()?;
+    let mut read_indices = requested_indices.clone();
+    if let Some(predicate) = &predicate {
+        if !read_indices.contains(&predicate.root_index) {
+            read_indices.push(predicate.root_index);
+            read_indices.sort_unstable();
+        }
+    }
     let projection = if columns.is_empty() {
         ProjectionMask::all()
     } else {
-        ProjectionMask::roots(builder.parquet_schema(), projection_indices.clone())
+        ProjectionMask::roots(builder.parquet_schema(), read_indices.clone())
     };
     let projected_fields = if columns.is_empty() {
         native_all_fields
     } else {
-        projection_indices
+        requested_indices
             .iter()
             .map(|index| native_field(&all_fields[*index]))
             .collect::<Result<Vec<_>, _>>()?
     };
+    let output_indices = if columns.is_empty() {
+        (0..all_fields.len()).collect::<Vec<_>>()
+    } else {
+        requested_indices
+            .iter()
+            .map(|index| {
+                read_indices
+                    .iter()
+                    .position(|read_index| read_index == index)
+                    .expect("requested columns are included in read projection")
+            })
+            .collect::<Vec<_>>()
+    };
+    if let Some(predicate) = &mut predicate {
+        predicate.column_index = if columns.is_empty() {
+            predicate.root_index
+        } else {
+            read_indices
+                .iter()
+                .position(|index| *index == predicate.root_index)
+                .expect("predicate column is included in read projection")
+        };
+    }
+    let selected_row_groups = select_row_groups(&builder, predicate.as_ref());
+    let row_groups_read = selected_row_groups.len();
+    let row_groups_skipped = row_groups.saturating_sub(row_groups_read);
     let reader = builder
         .with_batch_size(batch_size)
         .with_projection(projection)
+        .with_row_groups(selected_row_groups)
         .build()
         .map_err(|_error| malformed_open())?;
 
@@ -480,6 +604,10 @@ fn open_backend(
                 row_groups,
                 compressions,
                 writer_options,
+                predicate,
+                output_indices,
+                row_groups_read,
+                row_groups_skipped,
             }),
         },
         projected_fields,
@@ -488,6 +616,383 @@ fn open_backend(
 
 pub(crate) fn active_readers() -> usize {
     ACTIVE_READERS.load(Ordering::Relaxed)
+}
+
+fn compile_predicate(
+    predicate: NativePredicate,
+    fields: &arrow_schema::Fields,
+) -> Result<CompiledPredicate, NativeFailure> {
+    let root_index = fields
+        .iter()
+        .position(|field| field.name() == &predicate.column)
+        .ok_or_else(|| {
+            NativeFailure::invalid(Operation::ReaderOpen, "predicate column does not exist")
+        })?;
+    let operator = if predicate.operator == atoms::gt() {
+        PredicateOperator::Gt
+    } else if predicate.operator == atoms::gte() {
+        PredicateOperator::Gte
+    } else if predicate.operator == atoms::lt() {
+        PredicateOperator::Lt
+    } else if predicate.operator == atoms::lte() {
+        PredicateOperator::Lte
+    } else if predicate.operator == atoms::eq() {
+        PredicateOperator::Eq
+    } else {
+        return Err(NativeFailure::invalid(
+            Operation::ReaderOpen,
+            "predicate operator is unsupported",
+        ));
+    };
+    let field = &fields[root_index];
+    let (literal, prune_kind) = match field.data_type() {
+        DataType::Int8
+        | DataType::Int16
+        | DataType::UInt8
+        | DataType::UInt16
+        | DataType::UInt32
+        | DataType::UInt64 => (
+            PredicateLiteral::Integer(integer_literal(&predicate.literal)?),
+            None,
+        ),
+        DataType::Int32 => (
+            PredicateLiteral::Integer(integer_literal(&predicate.literal)?),
+            Some(PruneKind::Int32),
+        ),
+        DataType::Int64 => (
+            PredicateLiteral::Integer(integer_literal(&predicate.literal)?),
+            Some(PruneKind::Int64),
+        ),
+        DataType::Float32 | DataType::Float64 => (
+            PredicateLiteral::Float(float_literal(&predicate.literal)?),
+            None,
+        ),
+        DataType::Utf8 | DataType::LargeUtf8 => (
+            PredicateLiteral::Utf8(string_literal(&predicate.literal)?),
+            None,
+        ),
+        DataType::Boolean if matches!(operator, PredicateOperator::Eq) => (
+            PredicateLiteral::Boolean(boolean_literal(&predicate.literal)?),
+            None,
+        ),
+        _ => {
+            return Err(NativeFailure::new(
+                Category::Unsupported,
+                Operation::ReaderOpen,
+                "predicate column type or operator is unsupported",
+            ));
+        }
+    };
+    Ok(CompiledPredicate {
+        column: predicate.column,
+        column_index: 0,
+        root_index,
+        operator,
+        literal,
+        prune_kind,
+    })
+}
+
+fn integer_literal(literal: &NativeLiteral) -> Result<i64, NativeFailure> {
+    if literal.kind == atoms::integer() {
+        literal.integer.ok_or_else(predicate_literal_error)
+    } else {
+        Err(predicate_literal_error())
+    }
+}
+
+fn float_literal(literal: &NativeLiteral) -> Result<f64, NativeFailure> {
+    if literal.kind == atoms::float() {
+        literal
+            .float
+            .filter(|value| value.is_finite())
+            .ok_or_else(predicate_literal_error)
+    } else {
+        Err(predicate_literal_error())
+    }
+}
+
+fn string_literal(literal: &NativeLiteral) -> Result<String, NativeFailure> {
+    if literal.kind == atoms::utf8() {
+        literal.string.clone().ok_or_else(predicate_literal_error)
+    } else {
+        Err(predicate_literal_error())
+    }
+}
+
+fn boolean_literal(literal: &NativeLiteral) -> Result<bool, NativeFailure> {
+    if literal.kind == atoms::boolean() {
+        literal.boolean.ok_or_else(predicate_literal_error)
+    } else {
+        Err(predicate_literal_error())
+    }
+}
+
+fn predicate_literal_error() -> NativeFailure {
+    NativeFailure::invalid(
+        Operation::ReaderOpen,
+        "predicate literal does not match the column type",
+    )
+}
+
+fn select_row_groups(
+    builder: &ParquetRecordBatchReaderBuilder<ObjectChunkReader>,
+    predicate: Option<&CompiledPredicate>,
+) -> Vec<usize> {
+    let metadata = builder.metadata();
+    let Some(predicate) = predicate else {
+        return (0..metadata.num_row_groups()).collect();
+    };
+    let Some(prune_kind) = predicate.prune_kind else {
+        return (0..metadata.num_row_groups()).collect();
+    };
+    let Some(column_index) = builder
+        .parquet_schema()
+        .columns()
+        .iter()
+        .position(|column| column.path().parts().first() == Some(&predicate.column))
+    else {
+        return (0..metadata.num_row_groups()).collect();
+    };
+
+    metadata
+        .row_groups()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row_group)| {
+            let column = row_group.column(column_index);
+            let skip = column.statistics().is_some_and(|statistics| {
+                if statistics.null_count_opt() == u64::try_from(row_group.num_rows()).ok() {
+                    return true;
+                }
+                match (prune_kind, statistics, &predicate.literal) {
+                    (
+                        PruneKind::Int32,
+                        Statistics::Int32(values),
+                        PredicateLiteral::Integer(lit),
+                    ) => integer_statistics_skip(
+                        values.min_opt().copied().map(i128::from),
+                        values.max_opt().copied().map(i128::from),
+                        statistics.min_is_exact(),
+                        statistics.max_is_exact(),
+                        i128::from(*lit),
+                        predicate.operator,
+                    ),
+                    (
+                        PruneKind::Int64,
+                        Statistics::Int64(values),
+                        PredicateLiteral::Integer(lit),
+                    ) => integer_statistics_skip(
+                        values.min_opt().copied().map(i128::from),
+                        values.max_opt().copied().map(i128::from),
+                        statistics.min_is_exact(),
+                        statistics.max_is_exact(),
+                        i128::from(*lit),
+                        predicate.operator,
+                    ),
+                    _ => false,
+                }
+            });
+            (!skip).then_some(index)
+        })
+        .collect()
+}
+
+fn integer_statistics_skip(
+    min: Option<i128>,
+    max: Option<i128>,
+    min_exact: bool,
+    max_exact: bool,
+    literal: i128,
+    operator: PredicateOperator,
+) -> bool {
+    match operator {
+        PredicateOperator::Gt => max_exact && max.is_some_and(|max| max <= literal),
+        PredicateOperator::Gte => max_exact && max.is_some_and(|max| max < literal),
+        PredicateOperator::Lt => min_exact && min.is_some_and(|min| min >= literal),
+        PredicateOperator::Lte => min_exact && min.is_some_and(|min| min > literal),
+        PredicateOperator::Eq => {
+            (min_exact && min.is_some_and(|min| min > literal))
+                || (max_exact && max.is_some_and(|max| max < literal))
+        }
+    }
+}
+
+fn apply_predicate_and_projection(
+    batch: RecordBatch,
+    predicate: Option<&CompiledPredicate>,
+    output_indices: &[usize],
+) -> Result<RecordBatch, NativeFailure> {
+    let batch = match predicate {
+        Some(predicate) => {
+            let mask = predicate_mask(&batch, predicate)?;
+            filter_record_batch(&batch, &mask).map_err(|_| {
+                NativeFailure::new(
+                    Category::MalformedData,
+                    Operation::ReaderNext,
+                    "predicate batch filtering failed",
+                )
+            })?
+        }
+        None => batch,
+    };
+    if output_indices.len() == batch.num_columns()
+        && output_indices.iter().copied().eq(0..batch.num_columns())
+    {
+        Ok(batch)
+    } else {
+        batch.project(output_indices).map_err(|_| {
+            NativeFailure::new(
+                Category::MalformedData,
+                Operation::ReaderNext,
+                "predicate projection failed",
+            )
+        })
+    }
+}
+
+fn predicate_mask(
+    batch: &RecordBatch,
+    predicate: &CompiledPredicate,
+) -> Result<BooleanArray, NativeFailure> {
+    let array = batch.column(predicate.column_index);
+    let mask = match &predicate.literal {
+        PredicateLiteral::Integer(literal) => {
+            integer_predicate_mask(array, *literal, predicate.operator)
+        }
+        PredicateLiteral::Float(literal) => {
+            float_predicate_mask(array, *literal, predicate.operator)
+        }
+        PredicateLiteral::Utf8(literal) => {
+            string_predicate_mask(array, literal, predicate.operator)
+        }
+        PredicateLiteral::Boolean(literal) => boolean_predicate_mask(array, *literal),
+    };
+    mask.ok_or_else(|| {
+        NativeFailure::new(
+            Category::MalformedData,
+            Operation::ReaderNext,
+            "predicate column data is incompatible",
+        )
+    })
+}
+
+macro_rules! integer_array_mask {
+    ($array:expr, $type:ty, $literal:expr, $operator:expr) => {
+        $array
+            .as_any()
+            .downcast_ref::<PrimitiveArray<$type>>()
+            .map(|values| {
+                BooleanArray::from_iter(values.iter().map(|value| {
+                    value.map(|value| {
+                        compare_i128(i128::from(value), i128::from($literal), $operator)
+                    })
+                }))
+            })
+    };
+}
+
+fn integer_predicate_mask(
+    array: &ArrayRef,
+    literal: i64,
+    operator: PredicateOperator,
+) -> Option<BooleanArray> {
+    integer_array_mask!(array, Int8Type, literal, operator)
+        .or_else(|| integer_array_mask!(array, Int16Type, literal, operator))
+        .or_else(|| integer_array_mask!(array, Int32Type, literal, operator))
+        .or_else(|| integer_array_mask!(array, Int64Type, literal, operator))
+        .or_else(|| integer_array_mask!(array, UInt8Type, literal, operator))
+        .or_else(|| integer_array_mask!(array, UInt16Type, literal, operator))
+        .or_else(|| integer_array_mask!(array, UInt32Type, literal, operator))
+        .or_else(|| integer_array_mask!(array, UInt64Type, literal, operator))
+}
+
+fn compare_i128(value: i128, literal: i128, operator: PredicateOperator) -> bool {
+    match operator {
+        PredicateOperator::Gt => value > literal,
+        PredicateOperator::Gte => value >= literal,
+        PredicateOperator::Lt => value < literal,
+        PredicateOperator::Lte => value <= literal,
+        PredicateOperator::Eq => value == literal,
+    }
+}
+
+macro_rules! float_array_mask {
+    ($array:expr, $type:ty, $literal:expr, $operator:expr) => {
+        $array
+            .as_any()
+            .downcast_ref::<PrimitiveArray<$type>>()
+            .map(|values| {
+                BooleanArray::from_iter(values.iter().map(|value| {
+                    value.map(|value| compare_f64(f64::from(value), $literal, $operator))
+                }))
+            })
+    };
+}
+
+fn float_predicate_mask(
+    array: &ArrayRef,
+    literal: f64,
+    operator: PredicateOperator,
+) -> Option<BooleanArray> {
+    float_array_mask!(array, Float32Type, literal, operator)
+        .or_else(|| float_array_mask!(array, Float64Type, literal, operator))
+}
+
+fn compare_f64(value: f64, literal: f64, operator: PredicateOperator) -> bool {
+    match operator {
+        PredicateOperator::Gt => value > literal,
+        PredicateOperator::Gte => value >= literal,
+        PredicateOperator::Lt => value < literal,
+        PredicateOperator::Lte => value <= literal,
+        PredicateOperator::Eq => value == literal,
+    }
+}
+
+fn string_predicate_mask(
+    array: &ArrayRef,
+    literal: &str,
+    operator: PredicateOperator,
+) -> Option<BooleanArray> {
+    let utf8 = array.as_any().downcast_ref::<StringArray>().map(|values| {
+        BooleanArray::from_iter(
+            values
+                .iter()
+                .map(|value| value.map(|value| compare_str(value, literal, operator))),
+        )
+    });
+    utf8.or_else(|| {
+        array
+            .as_any()
+            .downcast_ref::<LargeStringArray>()
+            .map(|values| {
+                BooleanArray::from_iter(
+                    values
+                        .iter()
+                        .map(|value| value.map(|value| compare_str(value, literal, operator))),
+                )
+            })
+    })
+}
+
+fn compare_str(value: &str, literal: &str, operator: PredicateOperator) -> bool {
+    match operator {
+        PredicateOperator::Gt => value > literal,
+        PredicateOperator::Gte => value >= literal,
+        PredicateOperator::Lt => value < literal,
+        PredicateOperator::Lte => value <= literal,
+        PredicateOperator::Eq => value == literal,
+    }
+}
+
+fn boolean_predicate_mask(array: &ArrayRef, literal: bool) -> Option<BooleanArray> {
+    array.as_any().downcast_ref::<BooleanArray>().map(|values| {
+        BooleanArray::from_iter(
+            values
+                .iter()
+                .map(|value| value.map(|value| value == literal)),
+        )
+    })
 }
 
 fn compression_label(compression: Compression) -> &'static str {

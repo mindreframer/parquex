@@ -20,7 +20,8 @@ defmodule Parquex.Writer do
     max_row_group_rows: 1_048_576,
     data_page_size_limit: 1_048_576,
     flush: :before_publish,
-    sync: :none
+    sync: :none,
+    statistics: :chunk
   ]
   @keys Keyword.keys(@defaults)
   @compressions [:uncompressed, :snappy, :zstd, :gzip, :lz4_raw]
@@ -100,11 +101,13 @@ defmodule Parquex.Writer do
     compression = options[:compression]
     flush = options[:flush]
     sync = options[:sync]
+    statistics = options[:statistics]
 
     cond do
       compression not in @compressions -> invalid("unsupported compression")
       flush not in [:none, :each_chunk, :before_publish] -> invalid("invalid flush policy")
       sync not in [:none, :data, :all] -> invalid("invalid sync policy")
+      statistics not in [:chunk, :none] -> invalid("invalid statistics policy")
       true -> integer_settings(options)
     end
   end

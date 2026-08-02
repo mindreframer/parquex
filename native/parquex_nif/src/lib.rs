@@ -29,6 +29,7 @@ pub(crate) mod atoms {
         boolean,
         cancelled,
         closed,
+        chunk,
         conflict,
         data,
         deleted,
@@ -91,6 +92,11 @@ pub(crate) mod atoms {
         parquet_writer_stats,
         standard,
         explicit,
+        gt,
+        gte,
+        lt,
+        lte,
+        eq,
         s3_head,
         s3_read_range,
         s3_list,
@@ -235,6 +241,7 @@ struct NativeReaderOptions {
     batch_size: usize,
     prefetch_depth: usize,
     columns: Vec<String>,
+    predicate: Option<reader::NativePredicate>,
 }
 
 struct WriterResource {
@@ -620,6 +627,7 @@ fn reader_open(
             options.batch_size,
             options.prefetch_depth,
             options.columns,
+            options.predicate,
         )?;
         let resource = ResourceArc::new(reader);
         if env.monitor(&resource, &owner).is_none() {
@@ -647,6 +655,7 @@ fn reader_open_s3(
             options.batch_size,
             options.prefetch_depth,
             options.columns,
+            options.predicate,
         )?;
         let resource = ResourceArc::new(reader);
         if env.monitor(&resource, &owner).is_none() {

@@ -8,7 +8,7 @@ use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::{Compression, GzipLevel, ZstdLevel};
 use parquet::file::metadata::KeyValue;
-use parquet::file::properties::WriterProperties;
+use parquet::file::properties::{EnabledStatistics, WriterProperties};
 use rustler::{Atom, Binary, Env, LocalPid, Resource, Term};
 
 use crate::error::{Category, NativeFailure};
@@ -48,6 +48,7 @@ pub(crate) struct NativeWriterOptions {
     data_page_size_limit: usize,
     flush: Atom,
     sync: Atom,
+    statistics: Atom,
 }
 
 #[derive(rustler::NifMap, Clone, Copy)]
@@ -282,6 +283,7 @@ fn open_output(
         .set_max_row_group_row_count(Some(options.max_row_group_rows))
         .set_data_page_size_limit(options.data_page_size_limit)
         .set_write_batch_size(options.max_batch_rows.min(options.max_row_group_rows))
+        .set_statistics_enabled(statistics_policy(options.statistics)?)
         .set_key_value_metadata(Some(vec![
             KeyValue {
                 key: "parquex.compression".to_owned(),
@@ -383,6 +385,19 @@ fn sync_policy(value: Atom) -> Result<SyncPolicy, NativeFailure> {
         Err(NativeFailure::invalid(
             Operation::ParquetWriterOpen,
             "invalid sync policy",
+        ))
+    }
+}
+
+fn statistics_policy(value: Atom) -> Result<EnabledStatistics, NativeFailure> {
+    if value == atoms::chunk() {
+        Ok(EnabledStatistics::Chunk)
+    } else if value == atoms::none() {
+        Ok(EnabledStatistics::None)
+    } else {
+        Err(NativeFailure::invalid(
+            Operation::ParquetWriterOpen,
+            "invalid statistics policy",
         ))
     }
 }

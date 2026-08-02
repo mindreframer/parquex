@@ -135,6 +135,27 @@ defmodule Parquex.Location do
     Map.put(options, :secret_keys, MapSet.to_list(secret_keys))
   end
 
+  @doc false
+  @spec child(t(), String.t()) :: {:ok, t()} | {:error, Parquex.Error.t()}
+  def child(%__MODULE__{} = location, name)
+      when is_binary(name) and name != "" and name not in [".", ".."] do
+    if Path.basename(name) == name do
+      case location do
+        %__MODULE__{backend: :local, path: path} ->
+          new(Path.join(path, name), options_with_secrets(location))
+
+        %__MODULE__{backend: :s3} ->
+          key = Enum.join(Enum.reject([s3_key(location), name], &(&1 == "")), "/")
+          new("s3://#{s3_bucket(location)}/#{key}", options_with_secrets(location))
+      end
+    else
+      invalid_location("child object name must not contain path separators")
+    end
+  end
+
+  def child(%__MODULE__{}, _name),
+    do: invalid_location("child object name must be a non-empty basename")
+
   defp build_uri(%URI{scheme: scheme} = uri, options) do
     case String.downcase(scheme) do
       "file" -> build_file_uri(uri, options)

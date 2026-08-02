@@ -31,6 +31,7 @@ The bounded options and defaults are:
 | `:data_page_size_limit` | `1_048_576` | positive approximate encoded page-byte limit |
 | `:flush` | `:before_publish` | `:none`, `:each_chunk`, or `:before_publish` |
 | `:sync` | `:none` | `:none`, `:data`, or `:all` |
+| `:statistics` | `:chunk` | `:chunk` or `:none` |
 
 Every advertised codec is compiled into the pinned Parquet crate, round-tripped
 in ExUnit, and read in Rust by a separate low-level Parquet reader path. Codec
@@ -61,6 +62,6 @@ Producer exceptions propagate after cleanup; schema/value failure, explicit
 cancellation, writer-owner exit, footer failure, or publication failure also
 leave no completed destination or owned staging artifact.
 
-Completed Parquet objects are immutable. Byte append, replacement, S3
-multipart upload, table formats, and compaction orchestration are outside this
-contract.
+Completed Parquet objects are immutable. Byte append, replacement, table
+formats, and compaction orchestration are outside this contract. S3 transport
+uses the bounded multipart and create-only contract in [`s3.md`](s3.md).

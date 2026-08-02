@@ -6,6 +6,8 @@ defmodule Parquex.Reader do
   @default_batch_size 1_024
   @default_prefetch_depth 1
   @max_prefetch_depth 16
+  @min_i64 -9_223_372_036_854_775_808
+  @max_i64 9_223_372_036_854_775_807
 
   @spec open(Location.t(), keyword()) :: {:ok, Parquex.Stream.t()} | {:error, Error.t()}
   def open(location, options) when is_list(options) do
@@ -17,12 +19,14 @@ defmodule Parquex.Reader do
            positive_integer(options, :prefetch_depth, @default_prefetch_depth),
          :ok <- validate_prefetch(prefetch_depth),
          {:ok, columns} <- validate_columns(Keyword.get(options, :columns)),
+         {:ok, predicate} <- validate_predicate(Keyword.get(options, :where)),
          {:ok, {resource, native_fields}} <-
            open_native(location, %{
              max_range_bytes: Location.max_range_bytes(location),
              batch_size: batch_size,
              prefetch_depth: prefetch_depth,
-             columns: columns
+             columns: columns,
+             predicate: predicate
            }),
          {:ok, schema} <- Schema.from_native(native_fields) do
       {:ok, Parquex.Stream.new(resource, schema)}
@@ -54,7 +58,7 @@ defmodule Parquex.Reader do
     do: native_result(Native.reader_open_s3(Location.native_s3_config(location), options, self()))
 
   defp validate_keys(options) do
-    if Keyword.keys(options) -- [:batch_size, :prefetch_depth, :columns] == [],
+    if Keyword.keys(options) -- [:batch_size, :prefetch_depth, :columns, :where] == [],
       do: :ok,
       else: invalid_argument("unknown scan option")
   end
@@ -80,6 +84,38 @@ defmodule Parquex.Reader do
 
   defp validate_columns(_columns),
     do: invalid_argument("columns must be a non-empty list of unique names")
+
+  defp validate_predicate(nil), do: {:ok, nil}
+
+  defp validate_predicate({operator, column, literal})
+       when operator in [:gt, :gte, :lt, :lte, :eq] and is_binary(column) and column != "" do
+    literal_map =
+      cond do
+        is_boolean(literal) ->
+          %{kind: :boolean, integer: nil, float: nil, string: nil, boolean: literal}
+
+        is_integer(literal) and literal >= @min_i64 and literal <= @max_i64 ->
+          %{kind: :integer, integer: literal, float: nil, string: nil, boolean: nil}
+
+        is_float(literal) ->
+          %{kind: :float, integer: nil, float: literal, string: nil, boolean: nil}
+
+        is_binary(literal) ->
+          %{kind: :utf8, integer: nil, float: nil, string: literal, boolean: nil}
+
+        true ->
+          nil
+      end
+
+    if literal_map do
+      {:ok, %{operator: operator, column: column, literal: literal_map}}
+    else
+      invalid_argument("predicate literal type is unsupported")
+    end
+  end
+
+  defp validate_predicate(_predicate),
+    do: invalid_argument("where must be {operator, column, literal}")
 
   defp native_result({:ok, result}), do: {:ok, result}
   defp native_result({:error, payload}), do: {:error, Error.from_native(payload)}

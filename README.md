@@ -108,6 +108,34 @@ when row maps for one bounded batch are actually needed.
 The supported schema/value mappings and buffering envelope are documented in
 [`docs/parquet-reads.md`](docs/parquet-reads.md).
 
+## Append-oriented filtering and mixed inputs
+
+`Parquex.append/4` creates a collision-resistant new `.parquet` object beneath
+an explicit local directory or S3 prefix. A caller may provide a basename with
+`name:`, but publication remains create-only and never appends bytes to a
+completed object.
+
+Scans accept one typed comparison with `:where` and may combine it with a
+returned projection. Predicate-only columns are read for correctness and
+removed from the emitted schema; conservative min/max pruning skips a row group
+only when exact statistics prove it cannot match:
+
+```elixir
+{:ok, stream} =
+  Parquex.scan([local_part, s3_part],
+    columns: ["payload"],
+    where: {:gt, "offset", 10_000},
+    batch_size: 1_024,
+    prefetch_depth: 1,
+    source_concurrency: 2
+  )
+```
+
+Mixed scans preserve caller source order and lazily keep one source active,
+which is within the configured source-concurrency limit. See
+[`docs/append-filtering.md`](docs/append-filtering.md) for null semantics,
+pruning metrics, cancellation, and the bounded rewrite pattern.
+
 ## Streaming Parquet writes
 
 `Parquex.write/4` consumes one compatible bounded batch at a time and publishes

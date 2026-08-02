@@ -239,6 +239,63 @@ defmodule Parquex.S3IntegrationTest do
     refute Enum.any?(entries, &(Location.s3_key(&1.location) =~ ".parquex-"))
   end
 
+  test "append and mixed local/S3 scans preserve source order through a streaming rewrite", %{
+    root: root
+  } do
+    schema = schema()
+
+    {:ok, remote_batch} =
+      Batch.new(schema, %{"id" => [30, 31], "name" => ["remote-30", "remote-31"]})
+
+    assert {:ok, remote} = Parquex.append(root, schema, [remote_batch])
+    assert {:ok, another} = Parquex.append(root, schema, [remote_batch])
+    refute Location.s3_key(remote.location) == Location.s3_key(another.location)
+
+    local_path =
+      Path.join(System.tmp_dir!(), "parquex-mixed-#{System.unique_integer([:positive])}.parquet")
+
+    on_exit(fn -> File.rm(local_path) end)
+    {:ok, local} = Location.new(local_path)
+
+    {:ok, local_batch} =
+      Batch.new(schema, %{"id" => [10, 11], "name" => ["local-10", "local-11"]})
+
+    assert {:ok, _metadata} = Parquex.write(local, schema, [local_batch])
+    input_sizes = %{remote: remote.size, local: File.stat!(local_path).size}
+
+    assert {:ok, mixed} =
+             Parquex.scan([remote.location, local],
+               columns: ["name"],
+               where: {:gt, "id", 10},
+               batch_size: 1,
+               prefetch_depth: 1,
+               source_concurrency: 2
+             )
+
+    assert Enum.flat_map(mixed, &Batch.to_rows/1) == [
+             %{"name" => "remote-30"},
+             %{"name" => "remote-31"},
+             %{"name" => "local-11"}
+           ]
+
+    assert {:ok, rewrite_input} = Parquex.scan([remote.location, local], batch_size: 1)
+    {:ok, rewrite_destination} = Location.child(root, "rewrite.parquet")
+
+    assert {:ok, _metadata} =
+             Parquex.write(
+               rewrite_destination,
+               Parquex.MultiStream.schema(rewrite_input),
+               rewrite_input,
+               max_batch_rows: 1,
+               max_row_group_rows: 2
+             )
+
+    assert {:ok, rewritten} = Parquex.scan(rewrite_destination, batch_size: 2)
+    assert Enum.flat_map(rewritten, &Batch.to_rows/1) |> Enum.map(& &1["id"]) == [30, 31, 10, 11]
+    assert {:ok, %{size: remote_size}} = Object.head(remote.location)
+    assert %{remote: remote_size, local: File.stat!(local_path).size} == input_sizes
+  end
+
   defp schema do
     %Schema{
       fields: [

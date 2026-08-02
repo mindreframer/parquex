@@ -14,6 +14,8 @@ The scan options are:
   default `1`, maximum `16`.
 - `:columns` — non-empty list of unique top-level string names. Output remains
   in file-schema order.
+- `:where` — one typed `{operator, column, literal}` comparison. See
+  [`append-filtering.md`](append-filtering.md).
 
 The location's positive `:max_range_bytes` limits every metadata or data range.
 A Parquet page or footer larger than that bound is rejected; it is never
@@ -65,7 +67,7 @@ Normal EOF, early enumerable halt, consumer exceptions, explicit
 reader and release queued batches. Explicit close is idempotent. A stream is not
 rewindable; open another scan to enumerate the object again.
 
-Malformed metadata or batch data returns `:malformed_data`; invalid projection
-or bounds return `:invalid_argument`. Errors do not include object paths or data
-values. S3 reads, predicates, Parquet writes, and SQL are outside this read
-contract.
+Malformed metadata or batch data returns `:malformed_data`; invalid projection,
+predicate, or bounds return `:invalid_argument`. Errors do not include object
+paths or data values. SQL and a general expression engine remain outside this
+read contract.

@@ -19,20 +19,36 @@ defmodule Parquex do
   Opening reads only bounded footer/metadata ranges. Native data-page reads and
   decoding begin when the enumerable receives demand.
   """
-  @spec scan(Parquex.Location.t() | Path.t() | URI.t(), keyword()) ::
-          {:ok, Parquex.Stream.t()} | {:error, Parquex.Error.t()}
-  def scan(location, options \\ []), do: Parquex.Reader.open(location, options)
+  @spec scan(
+          Parquex.Location.t() | Path.t() | URI.t() | [Parquex.Location.t() | Path.t() | URI.t()],
+          keyword()
+        ) :: {:ok, Parquex.Stream.t() | Parquex.MultiStream.t()} | {:error, Parquex.Error.t()}
+  def scan(location, options \\ [])
+
+  def scan(locations, options) when is_list(locations),
+    do: Parquex.MultiStream.open(locations, options)
+
+  def scan(location, options), do: Parquex.Reader.open(location, options)
 
   @doc "Inspects a Parquet schema using bounded local or S3 metadata reads."
-  @spec schema(Parquex.Location.t() | Path.t() | URI.t(), keyword()) ::
+  @spec schema(
+          Parquex.Location.t() | Path.t() | URI.t() | [Parquex.Location.t() | Path.t() | URI.t()],
+          keyword()
+        ) ::
           {:ok, Parquex.Schema.t()} | {:error, Parquex.Error.t()}
   def schema(location, options \\ []) do
     with {:ok, stream} <- scan(location, options) do
-      schema = Parquex.Stream.schema(stream)
-      :ok = Parquex.Stream.close(stream)
+      schema = stream_schema(stream)
+      :ok = close_stream(stream)
       {:ok, schema}
     end
   end
+
+  defp stream_schema(%Parquex.Stream{} = stream), do: Parquex.Stream.schema(stream)
+  defp stream_schema(%Parquex.MultiStream{} = stream), do: Parquex.MultiStream.schema(stream)
+
+  defp close_stream(%Parquex.Stream{} = stream), do: Parquex.Stream.close(stream)
+  defp close_stream(%Parquex.MultiStream{} = stream), do: Parquex.MultiStream.close(stream)
 
   @doc "Streams bounded batches into one new immutable local or S3 Parquet object."
   @spec write(
@@ -53,6 +69,49 @@ defmodule Parquex do
         Parquex.Writer.cancel(writer)
       end
     end
+  end
+
+  @doc "Writes a uniquely named immutable Parquet object beneath an explicit prefix."
+  @spec append(
+          Parquex.Location.t() | Path.t() | URI.t(),
+          Parquex.Schema.t(),
+          Enumerable.t(),
+          keyword()
+        ) :: {:ok, Parquex.Object.Metadata.t()} | {:error, Parquex.Error.t()}
+  def append(prefix, schema, batches, options \\ [])
+
+  def append(prefix, schema, batches, options) when is_list(options) do
+    if Keyword.keyword?(options) do
+      {name, writer_options} = Keyword.pop(options, :name, append_name())
+
+      with {:ok, %Parquex.Location{} = prefix} <- normalize_append_prefix(prefix),
+           {:ok, destination} <- Parquex.Location.child(prefix, name) do
+        write(destination, schema, batches, writer_options)
+      end
+    else
+      append_error("append options must be a keyword list")
+    end
+  end
+
+  def append(_prefix, _schema, _batches, _options),
+    do: append_error("append options must be a keyword list")
+
+  defp append_name do
+    timestamp = System.system_time(:microsecond)
+    sequence = System.unique_integer([:positive, :monotonic])
+    "part-#{timestamp}-#{sequence}.parquet"
+  end
+
+  defp normalize_append_prefix(prefix) do
+    case Parquex.Location.normalize(prefix) do
+      {:ok, %Parquex.Location{} = location} -> {:ok, location}
+      {:ok, _many} -> append_error("append requires one explicit prefix")
+      {:error, _error} = error -> error
+    end
+  end
+
+  defp append_error(message) do
+    {:error, %Parquex.Error{category: :invalid_argument, operation: :append, message: message}}
   end
 
   defp write_batches(writer, batches) do

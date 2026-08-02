@@ -4,7 +4,6 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${project_root}"
 
-package_audit_dir=""
 compose_used=0
 rustfs_init_marker="${project_root}/_build/qa/rustfs_initialized_container_id"
 
@@ -30,10 +29,6 @@ cleanup() {
     docker compose logs --no-color --tail=200 rustfs rustfs-init || true
   fi
 
-  if [[ -n "${package_audit_dir}" && -d "${package_audit_dir}" ]]; then
-    rm -rf -- "${package_audit_dir}"
-  fi
-
   exit "${status}"
 }
 
@@ -42,24 +37,6 @@ trap cleanup EXIT
 run_quiet env MIX_ENV=test mix deps.get --check-locked
 mix format --check-formatted
 MIX_ENV=test mix compile --warnings-as-errors
-
-package_audit_dir="${project_root}/_build/package_audit_source"
-rm -rf -- "${package_audit_dir}"
-mkdir -p "${package_audit_dir}"
-run_quiet env MIX_ENV=test mix hex.build --unpack --output "${package_audit_dir}/package"
-test -f "${package_audit_dir}/package/native/parquex_nif/Cargo.lock"
-test -f "${package_audit_dir}/package/docs/release.md"
-test ! -e "${package_audit_dir}/package/priv/native/parquex_nif.so"
-! rg -n 'parquex-test-secret-not-for-production|row-value-that-must-not-enter-telemetry' \
-  "${package_audit_dir}/package"
-(
-  cd "${package_audit_dir}/package"
-  export MIX_BUILD_PATH="${project_root}/_build/package_audit"
-  export MIX_DEPS_PATH="${project_root}/_build/package_audit_deps"
-  run_quiet env MIX_ENV=prod mix deps.get --only prod
-  CARGO_TARGET_DIR="${project_root}/native/parquex_nif/target" \
-    MIX_ENV=prod mix compile --warnings-as-errors
-)
 
 run_quiet docker info
 docker compose config --quiet

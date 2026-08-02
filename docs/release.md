@@ -38,9 +38,9 @@ Rustler invokes the system toolchain selected as `+1.91.0`; Cargo dependencies
 are pinned in `native/parquex_nif/Cargo.lock`. No precompiled NIF is shipped in
 the initial source package.
 
-Run `mix deps.get` followed by `mix compile`. The authoritative development and
-release validation command is `bin/qa_check.sh`, which also requires Docker
-Compose for its reusable local RustFS environment.
+Run `mix deps.get` followed by `mix compile`. The authoritative logic quality
+command is `bin/qa_check.sh`, which also requires Docker Compose for its
+reusable local RustFS environment.
 
 ## Tuning and troubleshooting
 

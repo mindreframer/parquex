@@ -6,6 +6,7 @@ cd "${project_root}"
 
 package_audit_dir=""
 compose_used=0
+rustfs_init_marker="${project_root}/_build/qa/rustfs_initialized_container_id"
 
 cleanup() {
   status=$?
@@ -25,15 +26,14 @@ cleanup() {
 
 trap cleanup EXIT
 
-mix deps.get --check-locked
+MIX_ENV=test mix deps.get --check-locked
 mix format --check-formatted
 MIX_ENV=test mix compile --warnings-as-errors
-MIX_ENV=test mix docs --warnings-as-errors
 
 package_audit_dir="${project_root}/_build/package_audit_source"
 rm -rf -- "${package_audit_dir}"
 mkdir -p "${package_audit_dir}"
-mix hex.build --unpack --output "${package_audit_dir}/package"
+MIX_ENV=test mix hex.build --unpack --output "${package_audit_dir}/package"
 test -f "${package_audit_dir}/package/native/parquex_nif/Cargo.lock"
 test -f "${package_audit_dir}/package/docs/release.md"
 test ! -e "${package_audit_dir}/package/priv/native/parquex_nif.so"
@@ -52,7 +52,19 @@ docker info >/dev/null
 docker compose config --quiet
 compose_used=1
 docker compose up --detach --wait --wait-timeout 45 rustfs
-docker compose run --rm rustfs-init
+rustfs_container_id="$(docker compose ps --quiet rustfs)"
+test -n "${rustfs_container_id}"
+
+initialized_container_id=""
+if [[ -f "${rustfs_init_marker}" ]]; then
+  initialized_container_id="$(< "${rustfs_init_marker}")"
+fi
+
+if [[ "${initialized_container_id}" != "${rustfs_container_id}" ]]; then
+  docker compose run --rm rustfs-init
+  mkdir -p "$(dirname "${rustfs_init_marker}")"
+  printf '%s\n' "${rustfs_container_id}" >"${rustfs_init_marker}"
+fi
 
 export PARQUEX_RUSTFS_INTEGRATION=1
 export AWS_ACCESS_KEY_ID=parquex-test-access

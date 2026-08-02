@@ -2,13 +2,13 @@
 
 ## Progress
 
-- [ ] Phase 3.1: Integrate compatible pinned Arrow/Parquet crates and metadata range reads.
-- [ ] Phase 3.2: Define supported schema mappings and unsupported-type behavior.
-- [ ] Phase 3.3: Create the bounded, cancellable native reader resource.
-- [ ] Phase 3.4: Expose pull-based lazy Elixir batch streaming.
-- [ ] Phase 3.5: Preserve columnar batches with explicit access and conversion.
-- [ ] Phase 3.6: Verify lifecycle, projection, malformed input, and memory bounds.
-- [ ] Phase 3.7: Pass the epic gate and commit the completed read scope.
+- [x] Phase 3.1: Integrate compatible pinned Arrow/Parquet crates and metadata range reads.
+- [x] Phase 3.2: Define supported schema mappings and unsupported-type behavior.
+- [x] Phase 3.3: Create the bounded, cancellable native reader resource.
+- [x] Phase 3.4: Expose pull-based lazy Elixir batch streaming.
+- [x] Phase 3.5: Preserve columnar batches with explicit access and conversion.
+- [x] Phase 3.6: Verify lifecycle, projection, malformed input, and memory bounds.
+- [x] Phase 3.7: Pass the epic gate and commit the completed read scope.
 
 ## Implementation Steps
 
@@ -22,22 +22,22 @@
 
 ## Test Isolation Checklist
 
-- [ ] Every filesystem test uses a fresh temporary location and closes it explicitly.
-- [ ] Parquet fixtures are fixed or generated deterministically with documented schemas.
-- [ ] Memory tests use data materially larger than configured batch and prefetch buffers.
-- [ ] Cancellation tests synchronize at known batch boundaries rather than relying on sleeps.
-- [ ] Resource assertions account for reader, file, task, and native ownership cleanup.
-- [ ] Projection/range assertions use isolated instrumentation and do not depend on OS cache state.
+- [x] Every filesystem test uses a fresh temporary location and closes it explicitly.
+- [x] Parquet fixtures are fixed or generated deterministically with documented schemas.
+- [x] Memory tests use data materially larger than configured batch and prefetch buffers.
+- [x] Cancellation tests synchronize at known batch boundaries rather than relying on sleeps.
+- [x] Resource assertions account for reader, file, task, and native ownership cleanup.
+- [x] Projection/range assertions use isolated instrumentation and do not depend on OS cache state.
 
 ## Quality Gate
 
-- [ ] Schema, metadata, projection, and columnar batch tests pass.
-- [ ] Empty, nested/null, multi-row-group, malformed, and unsupported-input tests pass.
-- [ ] Early halt, consumer failure, repeated open/close, and resource cleanup tests pass.
-- [ ] Large-file buffering stays within the documented bounded-memory tolerance.
-- [ ] `bin/qa_check.sh` succeeds before the epic commit.
-- [ ] Git diff is focused on EPIC003 and contains no write, S3, predicate, or SQL behavior.
-- [ ] Commit title and informative body follow the commit rule.
+- [x] Schema, metadata, projection, and columnar batch tests pass.
+- [x] Empty, nested/null, multi-row-group, malformed, and unsupported-input tests pass.
+- [x] Early halt, consumer failure, repeated open/close, and resource cleanup tests pass.
+- [x] Large-file buffering stays within the documented bounded-memory tolerance.
+- [x] `bin/qa_check.sh` succeeds before the epic commit.
+- [x] Git diff is focused on EPIC003 and contains no write, S3, predicate, or SQL behavior.
+- [x] Commit title and informative body follow the commit rule.
 
 ## Commit Rule
 

@@ -29,4 +29,11 @@ defmodule Parquex.Native do
   def local_writer_publish(_writer), do: :erlang.nif_error(:nif_not_loaded)
   def local_writer_abort(_writer), do: :erlang.nif_error(:nif_not_loaded)
   def resource_snapshot, do: :erlang.nif_error(:nif_not_loaded)
+
+  def reader_open(_path, _allowed_root, _options, _owner),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def reader_next(_reader), do: :erlang.nif_error(:nif_not_loaded)
+  def reader_close(_reader), do: :erlang.nif_error(:nif_not_loaded)
+  def reader_stats(_reader), do: :erlang.nif_error(:nif_not_loaded)
 end

@@ -6,6 +6,7 @@ use rustler::{Binary, Encoder, Env, LocalPid, Monitor, OwnedBinary, Resource, Re
 mod error;
 mod local;
 mod object;
+mod reader;
 
 use error::NativeFailure;
 use local::{LocalStore, LocalWriter};
@@ -19,6 +20,9 @@ pub(crate) mod atoms {
         aborted,
         all,
         before_publish,
+        batch,
+        binary,
+        boolean,
         cancelled,
         closed,
         conflict,
@@ -27,6 +31,7 @@ pub(crate) mod atoms {
         each_chunk,
         error,
         invalid_argument,
+        malformed_data,
         native_failure,
         native_smoke,
         native_smoke_error,
@@ -44,7 +49,32 @@ pub(crate) mod atoms {
         local_writer_open,
         local_writer_publish,
         local_writer_write,
-        resource_snapshot
+        resource_snapshot,
+        reader_open,
+        reader_next,
+        reader_close,
+        reader_stats,
+        eof,
+        null,
+        integer,
+        float,
+        utf8,
+        fixed_binary,
+        date32,
+        date64,
+        time,
+        timestamp,
+        duration,
+        decimal,
+        list,
+        large_list,
+        fixed_list,
+        struct_type = "struct",
+        second,
+        millisecond,
+        microsecond,
+        nanosecond,
+        nil_atom = "nil"
     }
 }
 
@@ -61,6 +91,10 @@ pub(crate) enum Operation {
     WriterPublish,
     WriterAbort,
     ResourceSnapshot,
+    ReaderOpen,
+    ReaderNext,
+    ReaderClose,
+    ReaderStats,
 }
 
 impl Operation {
@@ -77,6 +111,10 @@ impl Operation {
             Self::WriterPublish => atoms::local_writer_publish(),
             Self::WriterAbort => atoms::local_writer_abort(),
             Self::ResourceSnapshot => atoms::resource_snapshot(),
+            Self::ReaderOpen => atoms::reader_open(),
+            Self::ReaderNext => atoms::reader_next(),
+            Self::ReaderClose => atoms::reader_close(),
+            Self::ReaderStats => atoms::reader_stats(),
         }
     }
 }
@@ -122,7 +160,16 @@ impl From<ObjectMetadata> for NativeMetadata {
 #[derive(rustler::NifMap)]
 struct ResourceSnapshot {
     active_writers: usize,
+    active_readers: usize,
     bytes_read: u64,
+}
+
+#[derive(rustler::NifMap)]
+struct NativeReaderOptions {
+    max_range_bytes: usize,
+    batch_size: usize,
+    prefetch_depth: usize,
+    columns: Vec<String>,
 }
 
 struct WriterResource {
@@ -331,9 +378,65 @@ fn resource_snapshot(env: Env<'_>) -> Term<'_> {
         let (active_writers, bytes_read) = local::resource_snapshot();
         Ok(ResourceSnapshot {
             active_writers,
+            active_readers: reader::active_readers(),
             bytes_read,
         })
     })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn reader_open(
+    env: Env<'_>,
+    path: String,
+    allowed_root: Option<String>,
+    options: NativeReaderOptions,
+    owner: LocalPid,
+) -> Term<'_> {
+    encode_guarded(env, Operation::ReaderOpen, || {
+        let (reader, fields) = reader::open(
+            location(path, allowed_root),
+            options.max_range_bytes,
+            options.batch_size,
+            options.prefetch_depth,
+            options.columns,
+        )?;
+        let resource = ResourceArc::new(reader);
+        if env.monitor(&resource, &owner).is_none() {
+            resource.close()?;
+            return Err(NativeFailure::expected(
+                Operation::ReaderOpen,
+                "could not monitor reader owner",
+            ));
+        }
+        Ok((resource, fields))
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn reader_next(env: Env<'_>, resource: ResourceArc<reader::ReaderResource>) -> Term<'_> {
+    match guarded(Operation::ReaderNext, || resource.next_batch()) {
+        Ok(Some(batch)) => {
+            match guarded(Operation::ReaderNext, || reader::encode_batch(env, &batch)) {
+                Ok(encoded) => (atoms::ok(), encoded).encode(env),
+                Err(failure) => (atoms::error(), failure.payload()).encode(env),
+            }
+        }
+        Ok(None) => (atoms::ok(), atoms::eof()).encode(env),
+        Err(failure) => (atoms::error(), failure.payload()).encode(env),
+    }
+}
+
+#[rustler::nif]
+fn reader_close(env: Env<'_>, resource: ResourceArc<reader::ReaderResource>) -> Term<'_> {
+    encode_guarded(env, Operation::ReaderClose, || {
+        resource.close()?;
+        Ok(atoms::closed())
+    })
+}
+
+#[rustler::nif]
+fn reader_stats(env: Env<'_>, resource: ResourceArc<reader::ReaderResource>) -> Term<'_> {
+    encode_guarded(env, Operation::ReaderStats, || resource.stats())
 }
 
 rustler::init!("Elixir.Parquex.Native");

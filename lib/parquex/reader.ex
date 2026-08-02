@@ -1,0 +1,98 @@
+defmodule Parquex.Reader do
+  @moduledoc false
+
+  alias Parquex.{Error, Location, Native, Schema}
+
+  @default_batch_size 1_024
+  @default_prefetch_depth 1
+  @max_prefetch_depth 16
+
+  @spec open(Location.t(), keyword()) :: {:ok, Parquex.Stream.t()} | {:error, Error.t()}
+  def open(location, options) when is_list(options) do
+    with true <- Keyword.keyword?(options) || invalid_options(),
+         {:ok, %Location{} = location} <- normalize_local(location),
+         :ok <- validate_keys(options),
+         {:ok, batch_size} <- positive_integer(options, :batch_size, @default_batch_size),
+         {:ok, prefetch_depth} <-
+           positive_integer(options, :prefetch_depth, @default_prefetch_depth),
+         :ok <- validate_prefetch(prefetch_depth),
+         {:ok, columns} <- validate_columns(Keyword.get(options, :columns)),
+         {:ok, {resource, native_fields}} <-
+           native_result(
+             Native.reader_open(
+               location.path,
+               Map.get(location.options, :allowed_root),
+               %{
+                 max_range_bytes: Location.max_range_bytes(location),
+                 batch_size: batch_size,
+                 prefetch_depth: prefetch_depth,
+                 columns: columns
+               },
+               self()
+             )
+           ),
+         {:ok, schema} <- Schema.from_native(native_fields) do
+      {:ok, Parquex.Stream.new(resource, schema)}
+    end
+  end
+
+  def open(_location, _options), do: invalid_options()
+
+  defp normalize_local(location) do
+    case Location.normalize(location) do
+      {:ok, %Location{backend: :local} = normalized} -> {:ok, normalized}
+      {:ok, %Location{backend: :s3}} -> unsupported()
+      {:ok, _many} -> invalid_argument("scan requires one location")
+      {:error, _error} = error -> error
+    end
+  end
+
+  defp validate_keys(options) do
+    if Keyword.keys(options) -- [:batch_size, :prefetch_depth, :columns] == [],
+      do: :ok,
+      else: invalid_argument("unknown scan option")
+  end
+
+  defp positive_integer(options, key, default) do
+    case Keyword.get(options, key, default) do
+      value when is_integer(value) and value > 0 -> {:ok, value}
+      _value -> invalid_argument("#{key} must be a positive integer")
+    end
+  end
+
+  defp validate_prefetch(depth) when depth <= @max_prefetch_depth, do: :ok
+  defp validate_prefetch(_depth), do: invalid_argument("prefetch_depth exceeds the maximum")
+
+  defp validate_columns(nil), do: {:ok, []}
+
+  defp validate_columns(columns) when is_list(columns) do
+    if columns != [] and Enum.all?(columns, &(is_binary(&1) and &1 != "")) and
+         Enum.uniq(columns) == columns,
+       do: {:ok, columns},
+       else: invalid_argument("columns must be a non-empty list of unique names")
+  end
+
+  defp validate_columns(_columns),
+    do: invalid_argument("columns must be a non-empty list of unique names")
+
+  defp native_result({:ok, result}), do: {:ok, result}
+  defp native_result({:error, payload}), do: {:error, Error.from_native(payload)}
+
+  defp native_result(_other),
+    do: {:error, Error.invalid_native_response(:reader_open, :invalid_response)}
+
+  defp invalid_options, do: invalid_argument("scan options must be a keyword list")
+
+  defp invalid_argument(message) do
+    {:error, %Error{category: :invalid_argument, operation: :reader_open, message: message}}
+  end
+
+  defp unsupported do
+    {:error,
+     %Error{
+       category: :unsupported,
+       operation: :reader_open,
+       message: "S3 Parquet reads are reserved for a later epic"
+     }}
+  end
+end

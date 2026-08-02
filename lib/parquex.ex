@@ -2,15 +2,37 @@ defmodule Parquex do
   @moduledoc """
   Streams bounded columnar batches to and from immutable Parquet objects.
 
-  Streaming is the primary Parquex interface. `Parquex.Object` currently
-  provides the backend-neutral foundation with bounded local ranges and staged,
-  create-only local publication. Later roadmap epics add Parquet batch streams
-  and activate S3-compatible locations.
+  Streaming is the primary Parquex interface. Local Parquet scans produce lazy,
+  projected `Parquex.Batch` values through the backend-neutral object layer.
+  `Parquex.Object` also provides bounded local ranges and staged, create-only
+  local publication. Later roadmap epics add Parquet writes and activate
+  S3-compatible locations.
 
   The diagnostic functions in this module verify that the packaged native
   boundary can load and that native failures are translated into stable Elixir
   errors.
   """
+
+  @doc """
+  Opens a single-pass, pull-based stream of bounded Parquet batches.
+
+  Opening reads only bounded footer/metadata ranges. Native data-page reads and
+  decoding begin when the enumerable receives demand.
+  """
+  @spec scan(Parquex.Location.t() | Path.t() | URI.t(), keyword()) ::
+          {:ok, Parquex.Stream.t()} | {:error, Parquex.Error.t()}
+  def scan(location, options \\ []), do: Parquex.Reader.open(location, options)
+
+  @doc "Inspects a local Parquet schema using bounded metadata reads."
+  @spec schema(Parquex.Location.t() | Path.t() | URI.t(), keyword()) ::
+          {:ok, Parquex.Schema.t()} | {:error, Parquex.Error.t()}
+  def schema(location, options \\ []) do
+    with {:ok, stream} <- scan(location, options) do
+      schema = Parquex.Stream.schema(stream)
+      :ok = Parquex.Stream.close(stream)
+      {:ok, schema}
+    end
+  end
 
   @doc """
   Verifies that the native boundary is loaded and compatible.

@@ -10,6 +10,7 @@ preserve:
 - [ADR 005: Focused scope](005-focused-scope.md)
 - [Native runtime and lifecycle rules](native-runtime.md)
 - [Object-access and local-publication contract](object-access.md)
+- [Streaming Parquet read contract](../parquet-reads.md)
 
 The roadmap is authoritative for feature sequencing. These records explain the
 constraints behind it and should be amended explicitly when a later decision

@@ -5,7 +5,7 @@ defmodule Parquex.FixtureCase do
 
   using do
     quote do
-      import Parquex.FixtureCase, only: [fixture_path: 1]
+      import Parquex.FixtureCase, only: [fixture_path: 1, materialize_fixture: 2]
     end
   end
 
@@ -20,5 +20,13 @@ defmodule Parquex.FixtureCase do
   @spec fixture_path(Path.t()) :: Path.t()
   def fixture_path(relative_path) do
     Path.expand(Path.join([__DIR__, "..", "fixtures", relative_path]))
+  end
+
+  @spec materialize_fixture(String.t(), Path.t()) :: Path.t()
+  def materialize_fixture(name, tmp_dir) do
+    encoded = File.read!(fixture_path("#{name}.parquet.b64"))
+    path = Path.join(tmp_dir, "#{name}.parquet")
+    File.write!(path, Base.decode64!(encoded, ignore: :whitespace))
+    path
   end
 end

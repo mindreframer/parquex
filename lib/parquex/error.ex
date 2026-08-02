@@ -11,6 +11,7 @@ defmodule Parquex.Error do
           :cancelled
           | :conflict
           | :invalid_argument
+          | :malformed_data
           | :native_failure
           | :not_found
           | :permission_denied
@@ -66,6 +67,7 @@ defmodule Parquex.Error do
               :cancelled,
               :conflict,
               :invalid_argument,
+              :malformed_data,
               :native_failure,
               :not_found,
               :permission_denied,

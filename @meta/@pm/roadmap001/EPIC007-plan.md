@@ -37,7 +37,7 @@
 - [x] Local/S3 memory, bounded-concurrency, cancellation, cleanup, and scheduler responsiveness tests pass.
 - [x] Telemetry, errors, logs, fixtures, and package contents disclose no credentials or row contents.
 - [x] Documentation and release notes accurately state supported behavior and deferred scope.
-- [x] The pinned RustFS `docker-compose.yml` workflow, readiness diagnostics, and teardown pass from a clean checkout.
+- [x] The pinned RustFS `docker-compose.yml` workflow, readiness diagnostics, repeat-run reuse, and explicit teardown command pass from a clean checkout.
 - [x] Package compilation, package-content checks, and documentation generation pass from a clean checkout.
 - [x] `bin/qa_check.sh` succeeds from the final clean checkout and the diff contains only EPIC007 work.
 - [x] Commit title and informative body follow the commit rule.

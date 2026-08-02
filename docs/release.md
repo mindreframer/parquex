@@ -40,7 +40,7 @@ the initial source package.
 
 Run `mix deps.get` followed by `mix compile`. The authoritative development and
 release validation command is `bin/qa_check.sh`, which also requires Docker
-Compose for its disposable RustFS environment.
+Compose for its reusable local RustFS environment.
 
 ## Tuning and troubleshooting
 

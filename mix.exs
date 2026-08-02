@@ -27,7 +27,7 @@ defmodule Parquex.MixProject do
     [
       {:rustler, "== 0.38.0", runtime: false},
       {:telemetry, "== 1.4.2"},
-      {:ex_doc, "== 0.40.3", only: :dev, runtime: false}
+      {:ex_doc, "== 0.40.3", only: [:dev, :test], runtime: false}
     ]
   end
 

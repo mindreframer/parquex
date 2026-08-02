@@ -204,10 +204,12 @@ quality gate from the repository root:
 bin/qa_check.sh
 ```
 
-The gate starts the pinned project-owned RustFS Compose service, creates its
-test bucket, runs isolated `:rustfs_integration` coverage, captures diagnostics
-on failure, and always removes its containers and volume. Running `mix test`
-directly excludes those tests unless `PARQUEX_RUSTFS_INTEGRATION=1` is set.
+The gate starts or reuses the pinned project-owned RustFS Compose service,
+creates its test bucket, runs isolated `:rustfs_integration` coverage, and
+captures diagnostics on failure. It leaves the healthy service and volume
+running for fast repeated checks; use `docker compose down --volumes` when you
+want to remove them. Running `mix test` directly excludes those tests unless
+`PARQUEX_RUSTFS_INTEGRATION=1` is set.
 
 ## Installation
 

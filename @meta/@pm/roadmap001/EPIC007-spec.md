@@ -37,7 +37,7 @@ The initial public contract has validated options, stable structured error categ
 
 Telemetry reports operation identity, backend kind, bytes/ranges, rows/batches, row groups read/skipped, retries, durations, cancellation, and current/peak buffering at documented event boundaries. Events and metadata never include row contents, credentials, authorization material, signed URLs, or unredacted sensitive options; handlers must not control operation correctness.
 
-Published memory and scheduler budgets are expressed as functions of configured batch, prefetch, range, source-concurrency, row-group/page, multipart-part, and in-flight limits, not total object size. `bin/qa_check.sh` is the sole release quality gate and validates the candidate from a clean checkout, including bounded startup, readiness, diagnostics, and teardown of the pinned project-owned RustFS service in `docker-compose.yml`.
+Published memory and scheduler budgets are expressed as functions of configured batch, prefetch, range, source-concurrency, row-group/page, multipart-part, and in-flight limits, not total object size. `bin/qa_check.sh` is the sole release quality gate and validates the candidate from a clean checkout, including bounded startup or reuse, readiness, diagnostics, and documented explicit teardown of the pinned project-owned RustFS service in `docker-compose.yml`.
 
 ## Acceptance Criteria
 

@@ -2,13 +2,13 @@
 
 ## Progress
 
-- [ ] Phase 1.1: Define public boundaries for Parquex, locations, schemas, batches, streams, options, and errors.
-- [ ] Phase 1.2: Bootstrap Rustler with a pinned native crate, minimal NIF, and boundary smoke test.
-- [ ] Phase 1.3: Establish resource ownership, panic containment, cancellation, scheduling, and error translation rules.
-- [ ] Phase 1.4: Create executable `bin/qa_check.sh` with deterministic Elixir and Rust quality stages.
-- [ ] Phase 1.5: Add fixture, temporary-directory, resource-leak, and RustFS-integration-tag test foundations.
-- [ ] Phase 1.6: Document pull-based streaming, backend-neutral storage, columnar batches, immutable outputs, and deferred features.
-- [ ] Phase 1.7: Pass the epic gate, verify Epic 1 acceptance criteria, and prepare the focused commit.
+- [x] Phase 1.1: Define public boundaries for Parquex, locations, schemas, batches, streams, options, and errors.
+- [x] Phase 1.2: Bootstrap Rustler with a pinned native crate, minimal NIF, and boundary smoke test.
+- [x] Phase 1.3: Establish resource ownership, panic containment, cancellation, scheduling, and error translation rules.
+- [x] Phase 1.4: Create executable `bin/qa_check.sh` with deterministic Elixir and Rust quality stages.
+- [x] Phase 1.5: Add fixture, temporary-directory, resource-leak, and RustFS-integration-tag test foundations.
+- [x] Phase 1.6: Document pull-based streaming, backend-neutral storage, columnar batches, immutable outputs, and deferred features.
+- [x] Phase 1.7: Pass the epic gate, verify Epic 1 acceptance criteria, and prepare the focused commit.
 
 ## Implementation Steps
 
@@ -22,22 +22,22 @@
 
 ## Test Isolation Checklist
 
-- [ ] Every filesystem test owns a unique temporary directory and removes it deterministically.
-- [ ] Native boundary tests call the public Elixir API and do not depend on test order.
-- [ ] Resource-leak checks use deterministic observability rather than wall-clock sleeps.
-- [ ] RustFS integration tests are tagged and remain excluded until EPIC005 adds the project-owned environment.
-- [ ] Default tests require no network, credentials, or external service.
-- [ ] No storage, Parquet, reader, or writer state is retained by the smoke NIF.
+- [x] Every filesystem test owns a unique temporary directory and removes it deterministically.
+- [x] Native boundary tests call the public Elixir API and do not depend on test order.
+- [x] Resource-leak checks use deterministic observability rather than wall-clock sleeps.
+- [x] RustFS integration tests are tagged and remain excluded until EPIC005 adds the project-owned environment.
+- [x] Default tests require no network, credentials, or external service.
+- [x] No storage, Parquet, reader, or writer state is retained by the smoke NIF.
 
 ## Quality Gate
 
-- [ ] Public boundaries and native runtime rules are documented.
-- [ ] Native success and translated-error smoke tests pass without panic or VM instability.
-- [ ] `bin/qa_check.sh` exists, is executable, and is the sole quality entry point.
-- [ ] `bin/qa_check.sh` succeeds from the repository root before the epic commit.
-- [ ] Git diff contains no generated artifacts, secrets, credentials, or unrelated changes.
-- [ ] No object-store, Parquet, DataFusion, Delta, Iceberg, or Hive behavior is included.
-- [ ] Commit title and informative body follow the commit rule.
+- [x] Public boundaries and native runtime rules are documented.
+- [x] Native success and translated-error smoke tests pass without panic or VM instability.
+- [x] `bin/qa_check.sh` exists, is executable, and is the sole quality entry point.
+- [x] `bin/qa_check.sh` succeeds from the repository root before the epic commit.
+- [x] Git diff contains no generated artifacts, secrets, credentials, or unrelated changes.
+- [x] No object-store, Parquet, DataFusion, Delta, Iceberg, or Hive behavior is included.
+- [x] Commit title and informative body follow the commit rule.
 
 ## Commit Rule
 

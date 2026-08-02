@@ -8,6 +8,19 @@ package_audit_dir=""
 compose_used=0
 rustfs_init_marker="${project_root}/_build/qa/rustfs_initialized_container_id"
 
+run_quiet() {
+  local output
+  local status
+
+  if output="$("$@" 2>&1)"; then
+    return 0
+  else
+    status=$?
+    printf '%s\n' "${output}" >&2
+    return "${status}"
+  fi
+}
+
 cleanup() {
   status=$?
   trap - EXIT
@@ -26,14 +39,14 @@ cleanup() {
 
 trap cleanup EXIT
 
-MIX_ENV=test mix deps.get --check-locked
+run_quiet env MIX_ENV=test mix deps.get --check-locked
 mix format --check-formatted
 MIX_ENV=test mix compile --warnings-as-errors
 
 package_audit_dir="${project_root}/_build/package_audit_source"
 rm -rf -- "${package_audit_dir}"
 mkdir -p "${package_audit_dir}"
-MIX_ENV=test mix hex.build --unpack --output "${package_audit_dir}/package"
+run_quiet env MIX_ENV=test mix hex.build --unpack --output "${package_audit_dir}/package"
 test -f "${package_audit_dir}/package/native/parquex_nif/Cargo.lock"
 test -f "${package_audit_dir}/package/docs/release.md"
 test ! -e "${package_audit_dir}/package/priv/native/parquex_nif.so"
@@ -43,15 +56,15 @@ test ! -e "${package_audit_dir}/package/priv/native/parquex_nif.so"
   cd "${package_audit_dir}/package"
   export MIX_BUILD_PATH="${project_root}/_build/package_audit"
   export MIX_DEPS_PATH="${project_root}/_build/package_audit_deps"
-  MIX_ENV=prod mix deps.get --only prod
+  run_quiet env MIX_ENV=prod mix deps.get --only prod
   CARGO_TARGET_DIR="${project_root}/native/parquex_nif/target" \
     MIX_ENV=prod mix compile --warnings-as-errors
 )
 
-docker info >/dev/null
+run_quiet docker info
 docker compose config --quiet
 compose_used=1
-docker compose up --detach --wait --wait-timeout 45 rustfs
+run_quiet docker compose up --detach --wait --wait-timeout 45 rustfs
 rustfs_container_id="$(docker compose ps --quiet rustfs)"
 test -n "${rustfs_container_id}"
 
@@ -61,7 +74,7 @@ if [[ -f "${rustfs_init_marker}" ]]; then
 fi
 
 if [[ "${initialized_container_id}" != "${rustfs_container_id}" ]]; then
-  docker compose run --rm rustfs-init
+  run_quiet docker compose run --rm rustfs-init
   mkdir -p "$(dirname "${rustfs_init_marker}")"
   printf '%s\n' "${rustfs_container_id}" >"${rustfs_init_marker}"
 fi

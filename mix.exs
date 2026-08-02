@@ -59,7 +59,7 @@ defmodule Parquex.MixProject do
       files:
         ~w(lib native/parquex_nif/src native/parquex_nif/Cargo.toml
            native/parquex_nif/Cargo.lock README.md CHANGELOG.md SECURITY.md
-           LICENSE docs mix.exs rust-toolchain.toml) ++
+           LICENSE docs mix.exs rust-toolchain.toml .cargo/config.toml) ++
           Path.wildcard("checksum-Elixir.Parquex.Native.exs"),
       licenses: ["LicenseRef-Proprietary"],
       links: %{

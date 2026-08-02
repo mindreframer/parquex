@@ -55,7 +55,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             native/parquex_nif/target
-          key: precompiled-${{ matrix.target }}-nif2.16-${{ hashFiles('native/parquex_nif/Cargo.lock', 'native/parquex_nif/Cargo.toml', 'native/parquex_nif/src/**/*.rs') }}
+          key: precompiled-${{ matrix.target }}-nif2.16-${{ hashFiles('.cargo/config.toml', 'native/parquex_nif/Cargo.lock', 'native/parquex_nif/Cargo.toml', 'native/parquex_nif/src/**/*.rs') }}
 
       - name: Install pinned Rust toolchain
         if: matrix.builder == 'native'

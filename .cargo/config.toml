@@ -1,0 +1,4 @@
+# NIFs are loaded into BEAM as shared libraries, so musl targets must not
+# statically link the C runtime.
+[target.'cfg(target_env = "musl")']
+rustflags = ["-C", "target-feature=-crt-static"]

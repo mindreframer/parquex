@@ -6,7 +6,7 @@
 - [x] Phase 7.2: Complete corrected API and migration documentation.
 - [x] Phase 7.3: Synchronize package/native version `0.2.0` and release metadata.
 - [x] Phase 7.4: Pass the final local QA gate and commit the epic.
-- [ ] Phase 7.5: Publish and verify all seven precompiled NIFs.
+- [x] Phase 7.5: Publish and verify all seven precompiled NIFs.
 - [ ] Phase 7.6: Generate/commit checksums and pass clean-consumer CI.
 - [ ] Phase 7.7: Mark ROADMAP002 completed and pass final CI.
 
@@ -29,8 +29,8 @@
 - [x] Docs/examples/package checks are accurate and green.
 - [x] Source/Cargo/changelog agree on `0.2.0`.
 - [x] `bin/qa_check.sh` passes before the epic commit.
-- [ ] Release workflow succeeds for all seven targets.
-- [ ] `v0.2.0` has exactly seven assets and checksums match.
+- [x] Release workflow succeeds for all seven targets.
+- [x] `v0.2.0` has exactly seven assets and checksums match.
 - [ ] Every clean consumer and Docker/RustFS CI job is green.
 - [ ] ROADMAP002 is marked completed only after all preceding checks.
 

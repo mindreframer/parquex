@@ -99,6 +99,13 @@ impl RemoteStore {
         &self.config.key
     }
 
+    pub(crate) fn multipart_buffer_limit_bytes(&self) -> usize {
+        self.config
+            .max_in_flight_parts
+            .saturating_add(1)
+            .saturating_mul(self.config.multipart_part_size)
+    }
+
     pub(crate) fn list(
         &self,
         prefix: &str,

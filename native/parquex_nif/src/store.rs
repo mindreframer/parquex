@@ -183,6 +183,13 @@ impl StoreResource {
             }),
         }
     }
+
+    pub(crate) fn multipart_buffer_limit_bytes(&self) -> usize {
+        match &self.backend {
+            StoreBackend::Local { .. } => 0,
+            StoreBackend::S3(store) => store.multipart_buffer_limit_bytes(),
+        }
+    }
 }
 
 pub(crate) enum StoreWriter {
@@ -223,6 +230,20 @@ impl StoreWriter {
         match self {
             Self::Local { writer, .. } => writer.abort(),
             Self::S3 { writer, .. } => writer.abort(),
+        }
+    }
+}
+
+impl Write for StoreWriter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        StoreWriter::write(self, buffer)
+            .map_err(|_| std::io::Error::other("staged store write failed"))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Local { writer, .. } => writer.flush(),
+            Self::S3 { writer, .. } => writer.flush(),
         }
     }
 }

@@ -2,12 +2,12 @@
 
 ## Progress
 
-- [ ] Phase 3.1: Add store/key Parquet operations.
-- [ ] Phase 3.2: Add finite row/column convenience conversion.
-- [ ] Phase 3.3: Add deterministic schema inference.
-- [ ] Phase 3.4: Preserve bounded explicit streaming.
-- [ ] Phase 3.5: Validate real-schema local/RustFS round-trips.
-- [ ] Phase 3.6: Pass the epic gate and commit.
+- [x] Phase 3.1: Add store/key Parquet operations.
+- [x] Phase 3.2: Add finite row/column convenience conversion.
+- [x] Phase 3.3: Add deterministic schema inference.
+- [x] Phase 3.4: Preserve bounded explicit streaming.
+- [x] Phase 3.5: Validate real-schema local/RustFS round-trips.
+- [x] Phase 3.6: Pass the epic gate and commit.
 
 ## Implementation Steps
 
@@ -21,12 +21,12 @@
 
 ## Quality Gate
 
-- [ ] Real event-shaped rows round-trip with Zstandard.
-- [ ] Inference rejects ambiguous/incompatible data deterministically.
-- [ ] Explicit schemas support empty and nullable datasets.
-- [ ] Greedy helpers are clearly documented.
-- [ ] Native resources return to baseline after repetition and halt.
-- [ ] `bin/qa_check.sh` passes.
+- [x] Real event-shaped rows round-trip with Zstandard.
+- [x] Inference rejects ambiguous/incompatible data deterministically.
+- [x] Explicit schemas support empty and nullable datasets.
+- [x] Greedy helpers are clearly documented.
+- [x] Native resources return to baseline after repetition and halt.
+- [x] `bin/qa_check.sh` passes.
 
 ## Commit Rule
 

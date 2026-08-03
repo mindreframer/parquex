@@ -111,6 +111,11 @@ defmodule Parquex.Store do
   @spec prefix(t()) :: String.t()
   def prefix(%__MODULE__{prefix: prefix}), do: prefix
 
+  @doc false
+  @spec max_range_bytes(t()) :: pos_integer()
+  def max_range_bytes(%__MODULE__{options: options}),
+    do: Map.get(options, :max_range_bytes, @default_max_range_bytes)
+
   @doc "Returns the stable identity of this native store handle."
   @spec identity(t()) :: {:ok, pos_integer()} | {:error, Error.t()}
   def identity(%__MODULE__{resource: resource}),

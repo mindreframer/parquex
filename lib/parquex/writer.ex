@@ -1,15 +1,18 @@
 defmodule Parquex.Writer do
   @moduledoc "An owned, incremental Parquet writer for one new immutable object."
 
-  alias Parquex.{Batch, Error, Location, Native, Schema}
+  alias Parquex.{Batch, Error, Location, Native, Schema, Store}
   alias Parquex.Object.Metadata
 
-  @enforce_keys [:resource, :location, :schema, :max_batch_rows]
-  defstruct [:resource, :location, :schema, :max_batch_rows]
+  @enforce_keys [:resource, :destination, :schema, :max_batch_rows]
+  defstruct [:resource, :destination, :location, :store, :key, :schema, :max_batch_rows]
 
   @opaque t :: %__MODULE__{
             resource: reference(),
-            location: Location.t(),
+            destination: {:location, Location.t()} | {:store, Store.t(), String.t()},
+            location: Location.t() | nil,
+            store: Store.t() | nil,
+            key: String.t() | nil,
             schema: Schema.t(),
             max_batch_rows: pos_integer()
           }
@@ -41,6 +44,7 @@ defmodule Parquex.Writer do
       {:ok,
        %__MODULE__{
          resource: resource,
+         destination: {:location, location},
          location: location,
          schema: schema,
          max_batch_rows: settings.max_batch_rows
@@ -53,6 +57,38 @@ defmodule Parquex.Writer do
   end
 
   def open(_location, _schema, _options), do: invalid("expected a schema and keyword options")
+
+  @spec open(Store.t(), String.t(), Schema.t(), keyword()) ::
+          {:ok, t()} | {:error, Error.t()}
+  def open(%Store{} = store, key, %Schema{} = schema, options) when is_list(options) do
+    with :ok <- validate_options(options),
+         {:ok, key} <- Store.normalize_key(key),
+         {:ok, settings} <- settings(options),
+         {:ok, native_schema} <- native_schema(schema),
+         {:ok, resource} <-
+           native_result(
+             Native.parquet_writer_open_store(
+               store.resource,
+               key,
+               native_schema,
+               settings,
+               self()
+             )
+           ) do
+      {:ok,
+       %__MODULE__{
+         resource: resource,
+         destination: {:store, store, key},
+         store: store,
+         key: key,
+         schema: schema,
+         max_batch_rows: settings.max_batch_rows
+       }}
+    end
+  end
+
+  def open(%Store{}, _key, _schema, _options),
+    do: invalid("expected a key, schema, and keyword options")
 
   @spec write_batch(t(), Batch.t()) :: :ok | {:error, Error.t()}
   def write_batch(%__MODULE__{} = writer, %Batch{} = batch) do
@@ -80,7 +116,13 @@ defmodule Parquex.Writer do
   @spec close(t()) :: {:ok, Metadata.t()} | {:error, Error.t()}
   def close(%__MODULE__{} = writer) do
     with {:ok, metadata} <- native_result(Native.parquet_writer_close(writer.resource)) do
-      {:ok, Metadata.from_native(writer.location, metadata)}
+      case writer.destination do
+        {:location, location} ->
+          {:ok, Metadata.from_native(location, metadata)}
+
+        {:store, _store, key} ->
+          {:ok, Parquex.Store.Metadata.from_native(key, metadata)}
+      end
     end
   end
 

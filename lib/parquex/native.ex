@@ -91,6 +91,7 @@ defmodule Parquex.Native do
     do: :erlang.nif_error(:nif_not_loaded)
 
   def reader_open_s3(_config, _options, _owner), do: :erlang.nif_error(:nif_not_loaded)
+  def reader_open_store(_store, _key, _options, _owner), do: :erlang.nif_error(:nif_not_loaded)
 
   def reader_next(_reader), do: :erlang.nif_error(:nif_not_loaded)
   def reader_close(_reader), do: :erlang.nif_error(:nif_not_loaded)
@@ -100,6 +101,9 @@ defmodule Parquex.Native do
     do: :erlang.nif_error(:nif_not_loaded)
 
   def parquet_writer_open_s3(_config, _schema, _options, _owner),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def parquet_writer_open_store(_store, _key, _schema, _options, _owner),
     do: :erlang.nif_error(:nif_not_loaded)
 
   def parquet_writer_write(_writer, _batch), do: :erlang.nif_error(:nif_not_loaded)

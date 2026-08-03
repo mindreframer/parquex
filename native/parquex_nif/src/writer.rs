@@ -18,6 +18,7 @@ use crate::object::{
     SyncPolicy, WriteOptions,
 };
 use crate::s3::{RemoteMultipartWriter, RemoteObject, S3Config};
+use crate::store::{StoreResource, StoreWriter};
 use crate::{atoms, Operation};
 
 #[derive(rustler::NifMap)]
@@ -111,6 +112,7 @@ struct WriterState {
 enum StagedOutput {
     Local(LocalWriter),
     S3(RemoteMultipartWriter),
+    Store(StoreWriter),
 }
 
 impl StagedOutput {
@@ -119,6 +121,11 @@ impl StagedOutput {
             Self::Local(writer) => writer.publish(),
             Self::S3(writer) => writer.publish().map(|metadata| ObjectMetadata {
                 path: metadata.key,
+                size: metadata.size,
+                modified_unix_ns: metadata.modified_unix_ns,
+            }),
+            Self::Store(writer) => writer.publish().map(|metadata| ObjectMetadata {
+                path: metadata.path,
                 size: metadata.size,
                 modified_unix_ns: metadata.modified_unix_ns,
             }),
@@ -131,6 +138,7 @@ impl Write for StagedOutput {
         match self {
             Self::Local(writer) => Write::write(writer, buffer),
             Self::S3(writer) => writer.write(buffer),
+            Self::Store(writer) => Write::write(writer, buffer),
         }
     }
 
@@ -138,6 +146,7 @@ impl Write for StagedOutput {
         match self {
             Self::Local(writer) => writer.flush(),
             Self::S3(writer) => writer.flush(),
+            Self::Store(writer) => Write::flush(writer),
         }
     }
 }
@@ -256,6 +265,26 @@ pub(crate) fn open_s3(
     let staged = RemoteObject::new(config)?.open_multipart(cancellation.clone())?;
     open_output(
         StagedOutput::S3(staged),
+        fields,
+        options,
+        cancellation,
+        multipart_buffer_limit_bytes,
+    )
+}
+
+pub(crate) fn open_store(
+    store: &StoreResource,
+    key: &str,
+    fields: Vec<InputField>,
+    options: NativeWriterOptions,
+) -> Result<ParquetWriterResource, NativeFailure> {
+    let cancellation = Arc::new(CancellationToken::default());
+    let flush = flush_policy(options.flush)?;
+    let sync = sync_policy(options.sync)?;
+    let multipart_buffer_limit_bytes = store.multipart_buffer_limit_bytes();
+    let staged = store.open_writer(key, flush, sync, cancellation.clone())?;
+    open_output(
+        StagedOutput::Store(staged),
         fields,
         options,
         cancellation,

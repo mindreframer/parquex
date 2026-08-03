@@ -1,7 +1,7 @@
 defmodule Parquex.Reader do
   @moduledoc false
 
-  alias Parquex.{Error, Location, Native, Schema}
+  alias Parquex.{Error, Location, Native, Schema, Store}
 
   @default_batch_size 1_024
   @default_prefetch_depth 1
@@ -34,6 +34,40 @@ defmodule Parquex.Reader do
   end
 
   def open(_location, _options), do: invalid_options()
+
+  @spec open(Store.t(), String.t(), keyword()) ::
+          {:ok, Parquex.Stream.t()} | {:error, Error.t()}
+  def open(%Store{} = store, key, options) when is_list(options) do
+    with true <- Keyword.keyword?(options) || invalid_options(),
+         {:ok, key} <- Store.normalize_key(key),
+         :ok <- validate_keys(options),
+         {:ok, batch_size} <- positive_integer(options, :batch_size, @default_batch_size),
+         {:ok, prefetch_depth} <-
+           positive_integer(options, :prefetch_depth, @default_prefetch_depth),
+         :ok <- validate_prefetch(prefetch_depth),
+         {:ok, columns} <- validate_columns(Keyword.get(options, :columns)),
+         {:ok, predicate} <- validate_predicate(Keyword.get(options, :where)),
+         {:ok, {resource, native_fields}} <-
+           native_result(
+             Native.reader_open_store(
+               store.resource,
+               key,
+               %{
+                 max_range_bytes: Store.max_range_bytes(store),
+                 batch_size: batch_size,
+                 prefetch_depth: prefetch_depth,
+                 columns: columns,
+                 predicate: predicate
+               },
+               self()
+             )
+           ),
+         {:ok, schema} <- Schema.from_native(native_fields) do
+      {:ok, Parquex.Stream.new(resource, schema)}
+    end
+  end
+
+  def open(%Store{}, _key, _options), do: invalid_options()
 
   defp normalize_one(location) do
     case Location.normalize(location) do

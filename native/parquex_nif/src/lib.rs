@@ -883,6 +883,36 @@ fn reader_open_s3(
 }
 
 #[rustler::nif(schedule = "DirtyIo")]
+fn reader_open_store(
+    env: Env<'_>,
+    store: ResourceArc<StoreResource>,
+    key: String,
+    options: NativeReaderOptions,
+    owner: LocalPid,
+) -> Term<'_> {
+    encode_guarded(env, Operation::ReaderOpen, || {
+        let (reader, fields) = reader::open_store(
+            store,
+            key,
+            options.max_range_bytes,
+            options.batch_size,
+            options.prefetch_depth,
+            options.columns,
+            options.predicate,
+        )?;
+        let resource = ResourceArc::new(reader);
+        if env.monitor(&resource, &owner).is_none() {
+            resource.close()?;
+            return Err(NativeFailure::expected(
+                Operation::ReaderOpen,
+                "could not monitor reader owner",
+            ));
+        }
+        Ok((resource, fields))
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
 fn reader_next(env: Env<'_>, resource: ResourceArc<reader::ReaderResource>) -> Term<'_> {
     match guarded(Operation::ReaderNext, || resource.next_batch()) {
         Ok(Some(batch)) => {
@@ -942,6 +972,28 @@ fn parquet_writer_open_s3(
 ) -> Term<'_> {
     encode_guarded(env, Operation::ParquetWriterOpen, || {
         let resource = ResourceArc::new(writer::open_s3(config, schema, options)?);
+        if env.monitor(&resource, &owner).is_none() {
+            resource.abort()?;
+            return Err(NativeFailure::expected(
+                Operation::ParquetWriterOpen,
+                "could not monitor Parquet writer owner",
+            ));
+        }
+        Ok(resource)
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn parquet_writer_open_store(
+    env: Env<'_>,
+    store: ResourceArc<StoreResource>,
+    key: String,
+    schema: Vec<writer::InputField>,
+    options: writer::NativeWriterOptions,
+    owner: LocalPid,
+) -> Term<'_> {
+    encode_guarded(env, Operation::ParquetWriterOpen, || {
+        let resource = ResourceArc::new(writer::open_store(&store, &key, schema, options)?);
         if env.monitor(&resource, &owner).is_none() {
             resource.abort()?;
             return Err(NativeFailure::expected(

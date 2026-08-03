@@ -12,12 +12,7 @@ use parquet::file::properties::{EnabledStatistics, WriterProperties};
 use rustler::{Atom, Binary, Env, LocalPid, Resource, Term};
 
 use crate::error::{Category, NativeFailure};
-use crate::local::{LocalStore, LocalWriter};
-use crate::object::{
-    CancellationToken, FlushPolicy, ObjectLocation, ObjectMetadata, ObjectStore, StagedWrite,
-    SyncPolicy, WriteOptions,
-};
-use crate::s3::{RemoteMultipartWriter, RemoteObject, S3Config};
+use crate::object::{CancellationToken, FlushPolicy, ObjectMetadata, SyncPolicy};
 use crate::store::{StoreResource, StoreWriter};
 use crate::{atoms, Operation};
 
@@ -109,45 +104,25 @@ struct WriterState {
     stats: WriterStats,
 }
 
-enum StagedOutput {
-    Local(LocalWriter),
-    S3(RemoteMultipartWriter),
-    Store(StoreWriter),
-}
+struct StagedOutput(StoreWriter);
 
 impl StagedOutput {
     fn publish(&mut self) -> Result<ObjectMetadata, NativeFailure> {
-        match self {
-            Self::Local(writer) => writer.publish(),
-            Self::S3(writer) => writer.publish().map(|metadata| ObjectMetadata {
-                path: metadata.key,
-                size: metadata.size,
-                modified_unix_ns: metadata.modified_unix_ns,
-            }),
-            Self::Store(writer) => writer.publish().map(|metadata| ObjectMetadata {
-                path: metadata.path,
-                size: metadata.size,
-                modified_unix_ns: metadata.modified_unix_ns,
-            }),
-        }
+        self.0.publish().map(|metadata| ObjectMetadata {
+            path: metadata.path,
+            size: metadata.size,
+            modified_unix_ns: metadata.modified_unix_ns,
+        })
     }
 }
 
 impl Write for StagedOutput {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        match self {
-            Self::Local(writer) => Write::write(writer, buffer),
-            Self::S3(writer) => writer.write(buffer),
-            Self::Store(writer) => Write::write(writer, buffer),
-        }
+        Write::write(&mut self.0, buffer)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        match self {
-            Self::Local(writer) => writer.flush(),
-            Self::S3(writer) => writer.flush(),
-            Self::Store(writer) => Write::flush(writer),
-        }
+        Write::flush(&mut self.0)
     }
 }
 
@@ -226,52 +201,6 @@ impl Drop for WriterState {
     }
 }
 
-pub(crate) fn open(
-    location: ObjectLocation,
-    fields: Vec<InputField>,
-    options: NativeWriterOptions,
-) -> Result<ParquetWriterResource, NativeFailure> {
-    let cancellation = Arc::new(CancellationToken::default());
-    let flush = flush_policy(options.flush)?;
-    let sync = sync_policy(options.sync)?;
-    let staged = LocalStore.stage(
-        &location,
-        WriteOptions { flush, sync },
-        cancellation.clone(),
-    )?;
-    open_output(
-        StagedOutput::Local(staged),
-        fields,
-        options,
-        cancellation,
-        0,
-    )
-}
-
-pub(crate) fn open_s3(
-    config: S3Config,
-    fields: Vec<InputField>,
-    options: NativeWriterOptions,
-) -> Result<ParquetWriterResource, NativeFailure> {
-    // These local durability controls remain validated for a backend-neutral API,
-    // but S3 durability is governed by successful multipart completion.
-    flush_policy(options.flush)?;
-    sync_policy(options.sync)?;
-    let multipart_buffer_limit_bytes = config
-        .max_in_flight_parts
-        .saturating_add(1)
-        .saturating_mul(config.multipart_part_size);
-    let cancellation = Arc::new(CancellationToken::default());
-    let staged = RemoteObject::new(config)?.open_multipart(cancellation.clone())?;
-    open_output(
-        StagedOutput::S3(staged),
-        fields,
-        options,
-        cancellation,
-        multipart_buffer_limit_bytes,
-    )
-}
-
 pub(crate) fn open_store(
     store: &StoreResource,
     key: &str,
@@ -284,7 +213,7 @@ pub(crate) fn open_store(
     let multipart_buffer_limit_bytes = store.multipart_buffer_limit_bytes();
     let staged = store.open_writer(key, flush, sync, cancellation.clone())?;
     open_output(
-        StagedOutput::Store(staged),
+        StagedOutput(staged),
         fields,
         options,
         cancellation,

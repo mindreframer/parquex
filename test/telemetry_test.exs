@@ -1,7 +1,7 @@
 defmodule Parquex.TelemetryTest do
   use Parquex.FixtureCase, async: false
 
-  alias Parquex.{Batch, Location, Object, Schema, Stream, Writer}
+  alias Parquex.{Batch, Schema, Store, Stream, Writer}
   alias Parquex.Schema.Field
 
   @events [
@@ -37,25 +37,24 @@ defmodule Parquex.TelemetryTest do
   } do
     secret = "row-value-that-must-not-enter-telemetry"
     path = Path.join(tmp_dir, "telemetry.parquet")
-
-    {:ok, location} =
-      Location.new(path, allowed_root: tmp_dir, secret_keys: [:marker], marker: secret)
+    {:ok, store} = Store.open(:local, root: tmp_dir)
 
     schema = schema()
     {:ok, batch} = Batch.new(schema, %{"id" => [1, 2], "payload" => [secret, "safe"]})
 
-    assert {:ok, writer} = Writer.open(location, schema)
+    assert {:ok, writer} = Writer.open(store, "telemetry.parquet", schema)
     assert :ok = Writer.write_batch(writer, batch)
     assert {:ok, write_stats} = Writer.stats(writer)
     assert write_stats.rows == 2
     assert {:ok, _metadata} = Writer.close(writer)
 
-    assert {:ok, stream} = Parquex.scan(location, batch_size: 1)
+    assert {:ok, stream} = Parquex.stream(store, "telemetry.parquet", batch_size: 1)
     assert Enum.count(stream) == 2
     assert {:ok, read_stats} = Stream.stats(stream)
     assert read_stats.range_requests > 0
     assert :ok = Stream.close(stream)
-    assert {:ok, _bytes} = Object.read_range(location, 0, 4)
+    assert {:ok, _bytes} = Store.read_range(store, "telemetry.parquet", 0, 4)
+    assert :ok = Parquex.Telemetry.span(:test_success, store, fn -> :ok end)
 
     events = drain_events([])
     assert Enum.any?(events, &match?({[:parquex, :operation, :start], _, _}, &1))

@@ -1,7 +1,7 @@
 defmodule Parquex.StoreS3IntegrationTest do
   use Parquex.RustFSCase, async: false
 
-  alias Parquex.{Error, Object, Store}
+  alias Parquex.{Error, Store}
 
   @bucket "parquex-test"
   @access "parquex-test-access"
@@ -9,7 +9,7 @@ defmodule Parquex.StoreS3IntegrationTest do
 
   setup do
     prefix = "store-integration/#{System.unique_integer([:positive, :monotonic])}"
-    before = Object.resource_snapshot()
+    before = Store.resource_snapshot()
     assert {:ok, store} = Store.open(:s3, store_options(prefix))
 
     on_exit(fn ->
@@ -23,7 +23,7 @@ defmodule Parquex.StoreS3IntegrationTest do
   end
 
   test "one S3 client is reused across the full object contract", %{store: store, before: before} do
-    opened = Object.resource_snapshot()
+    opened = Store.resource_snapshot()
     assert opened.s3_clients_created == before.s3_clients_created + 1
     assert {:ok, identity} = Store.identity(store)
 
@@ -41,7 +41,7 @@ defmodule Parquex.StoreS3IntegrationTest do
 
     assert :ok = Store.delete(store, "objects/value.bin")
     assert {:ok, ^identity} = Store.identity(store)
-    assert Object.resource_snapshot().s3_clients_created == opened.s3_clients_created
+    assert Store.resource_snapshot().s3_clients_created == opened.s3_clients_created
   end
 
   test "store inspection and failures redact credentials", %{store: store} do

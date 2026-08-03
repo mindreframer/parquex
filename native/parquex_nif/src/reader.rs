@@ -23,9 +23,7 @@ use parquet::file::statistics::Statistics;
 use rustler::{Encoder, Env, OwnedBinary, Resource, ResourceArc, Term};
 
 use crate::error::{Category, NativeFailure};
-use crate::local::LocalStore;
-use crate::object::{ByteRange, CancellationToken, ObjectLocation, ObjectStore};
-use crate::s3::{RemoteObject, S3Config};
+use crate::object::CancellationToken;
 use crate::store::StoreResource;
 use crate::{atoms, Operation};
 
@@ -48,22 +46,14 @@ impl RangeMetrics {
 }
 
 #[derive(Clone)]
-enum ChunkBackend {
-    Local(ObjectLocation),
-    S3(Box<RemoteObject>),
-    Store {
-        store: ResourceArc<StoreResource>,
-        key: String,
-    },
+struct ChunkBackend {
+    store: ResourceArc<StoreResource>,
+    key: String,
 }
 
 impl Debug for ChunkBackend {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Local(_) => formatter.write_str("Local"),
-            Self::S3(_) => formatter.write_str("S3"),
-            Self::Store { .. } => formatter.write_str("Store"),
-        }
+        formatter.write_str("Store")
     }
 }
 
@@ -74,20 +64,8 @@ impl ChunkBackend {
         length: usize,
         cancellation: &CancellationToken,
     ) -> Result<Vec<u8>, NativeFailure> {
-        match self {
-            Self::Local(location) => LocalStore.read_range(
-                location,
-                ByteRange {
-                    offset,
-                    length: length as u64,
-                },
-                cancellation,
-            ),
-            Self::S3(object) => {
-                object.read_range(offset, length, cancellation, Operation::ReaderNext)
-            }
-            Self::Store { store, key } => store.read_range(key, offset, length as u64),
-        }
+        cancellation.check(Operation::ReaderNext)?;
+        self.store.read_range(&self.key, offset, length as u64)
     }
 }
 
@@ -433,65 +411,6 @@ impl NativeDataType {
     }
 }
 
-pub(crate) fn open(
-    location: ObjectLocation,
-    max_range_bytes: usize,
-    batch_size: usize,
-    prefetch_depth: usize,
-    columns: Vec<String>,
-    predicate: Option<NativePredicate>,
-) -> Result<(ReaderResource, Vec<NativeField>), NativeFailure> {
-    let cancellation = Arc::new(CancellationToken::default());
-    let metadata = LocalStore
-        .head(&location, &cancellation)
-        .map_err(|error| NativeFailure {
-            operation: Operation::ReaderOpen,
-            ..error
-        })?;
-    open_backend(
-        ChunkBackend::Local(location),
-        metadata.size,
-        cancellation,
-        ReaderOpenSettings {
-            max_range_bytes,
-            batch_size,
-            prefetch_depth,
-            columns,
-            predicate,
-        },
-    )
-}
-
-pub(crate) fn open_s3(
-    config: S3Config,
-    max_range_bytes: usize,
-    batch_size: usize,
-    prefetch_depth: usize,
-    columns: Vec<String>,
-    predicate: Option<NativePredicate>,
-) -> Result<(ReaderResource, Vec<NativeField>), NativeFailure> {
-    let cancellation = Arc::new(CancellationToken::default());
-    let object = RemoteObject::new(config)?;
-    let metadata = object
-        .head(&cancellation, Operation::ReaderOpen)
-        .map_err(|error| NativeFailure {
-            operation: Operation::ReaderOpen,
-            ..error
-        })?;
-    open_backend(
-        ChunkBackend::S3(Box::new(object)),
-        metadata.size,
-        cancellation,
-        ReaderOpenSettings {
-            max_range_bytes,
-            batch_size,
-            prefetch_depth,
-            columns,
-            predicate,
-        },
-    )
-}
-
 pub(crate) fn open_store(
     store: ResourceArc<StoreResource>,
     key: String,
@@ -507,7 +426,7 @@ pub(crate) fn open_store(
         ..error
     })?;
     open_backend(
-        ChunkBackend::Store { store, key },
+        ChunkBackend { store, key },
         metadata.size,
         cancellation,
         ReaderOpenSettings {

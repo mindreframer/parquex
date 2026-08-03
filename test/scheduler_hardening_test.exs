@@ -1,7 +1,7 @@
 defmodule Parquex.SchedulerHardeningTest do
   use Parquex.FixtureCase, async: false
 
-  alias Parquex.{Batch, Location, Schema, Writer}
+  alias Parquex.{Batch, Schema, Store, Writer}
   alias Parquex.Schema.Field
 
   test "large native encoding leaves normal BEAM schedulers responsive", %{tmp_dir: tmp_dir} do
@@ -15,10 +15,13 @@ defmodule Parquex.SchedulerHardeningTest do
     ids = Enum.to_list(1..50_000)
     payloads = Enum.map(ids, &String.pad_trailing(Integer.to_string(&1), 512, "x"))
     {:ok, batch} = Batch.new(schema, %{"id" => ids, "payload" => payloads})
-    {:ok, location} = Location.new(Path.join(tmp_dir, "scheduler.parquet"), allowed_root: tmp_dir)
+    {:ok, store} = Store.open(:local, root: tmp_dir)
 
     assert {:ok, writer} =
-             Writer.open(location, schema, compression: :uncompressed, max_batch_rows: 50_000)
+             Writer.open(store, "scheduler.parquet", schema,
+               compression: :uncompressed,
+               max_batch_rows: 50_000
+             )
 
     parent = self()
 

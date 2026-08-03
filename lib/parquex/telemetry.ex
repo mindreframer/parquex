@@ -7,7 +7,7 @@ defmodule Parquex.Telemetry do
   emitted.
   """
 
-  alias Parquex.{Batch, Error, Location}
+  alias Parquex.{Batch, Error, Store}
 
   @prefix [:parquex]
 
@@ -74,7 +74,7 @@ defmodule Parquex.Telemetry do
   end
 
   @doc false
-  def cancellation(kind, source) when kind in [:reader, :writer, :mixed_reader] do
+  def cancellation(kind, source) when kind in [:reader, :writer] do
     execute([:cancellation], %{cancellations: 1}, source_metadata(source) |> Map.put(:kind, kind))
   end
 
@@ -116,8 +116,8 @@ defmodule Parquex.Telemetry do
 
   defp source_metadata(source), do: %{backend: backend(source), source_count: 1}
 
-  defp backend(%Location{backend: backend}), do: backend
-  defp backend(%{location: %Location{backend: backend}}), do: backend
+  defp backend(%Store{backend: backend}), do: backend
+  defp backend(%{store: %Store{backend: backend}}), do: backend
   defp backend(_source), do: :unknown
 
   defp result_status({:ok, _result}), do: {:ok, :none, 0}

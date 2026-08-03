@@ -1,7 +1,7 @@
 defmodule Parquex.DatasetStreamTest do
   use Parquex.FixtureCase, async: false
 
-  alias Parquex.{Dataset, Object, Schema, Store}
+  alias Parquex.{Dataset, Schema, Store}
 
   setup %{tmp_dir: tmp_dir} do
     {:ok, store} = Store.open(:local, root: tmp_dir)
@@ -92,7 +92,7 @@ defmodule Parquex.DatasetStreamTest do
     assert {:ok, _metadata} =
              Store.put(store, "events/year=2026/month=8/day=3/hour=14/broken.parquet", ["broken"])
 
-    before = Object.resource_snapshot()
+    before = Store.resource_snapshot()
 
     assert {:ok, stream} =
              Dataset.stream(dataset,
@@ -105,7 +105,7 @@ defmodule Parquex.DatasetStreamTest do
     assert {:ok, stats} = Dataset.Stream.stats(stream)
     assert stats.listed_partitions == 1
     assert stats.opened_files == 1
-    assert Object.resource_snapshot().active_readers == before.active_readers
+    assert Store.resource_snapshot().active_readers == before.active_readers
 
     assert {:ok, failing_stream} =
              Dataset.stream(dataset,
@@ -117,7 +117,7 @@ defmodule Parquex.DatasetStreamTest do
       Enum.each(failing_stream, fn _batch -> raise "consumer stopped" end)
     end
 
-    assert Object.resource_snapshot().active_readers == before.active_readers
+    assert Store.resource_snapshot().active_readers == before.active_readers
   end
 
   test "empty and missing ranges are empty successes", %{dataset: dataset} do

@@ -1,7 +1,7 @@
 defmodule Parquex.ParquetStoreS3IntegrationTest do
   use Parquex.RustFSCase, async: false
 
-  alias Parquex.{Object, Store}
+  alias Parquex.Store
 
   @bucket "parquex-test"
   @access "parquex-test-access"
@@ -9,7 +9,7 @@ defmodule Parquex.ParquetStoreS3IntegrationTest do
 
   setup do
     prefix = "parquet-store/#{System.unique_integer([:positive, :monotonic])}"
-    before = Object.resource_snapshot()
+    before = Store.resource_snapshot()
     {:ok, store} = Store.open(:s3, options(prefix))
 
     on_exit(fn ->
@@ -31,12 +31,12 @@ defmodule Parquex.ParquetStoreS3IntegrationTest do
       %{"occurred_at" => ~U[2026-08-03 10:00:01.000002Z], "sequence" => 42, "space" => "a"}
     ]
 
-    opened = Object.resource_snapshot()
+    opened = Store.resource_snapshot()
     assert opened.s3_clients_created == before.s3_clients_created + 1
     assert {:ok, _metadata} = Parquex.write(store, "events.parquet", rows, compression: :zstd)
     assert {:ok, ^rows} = Parquex.read(store, "events.parquet", batch_size: 1)
     assert {:ok, _schema} = Parquex.schema(store, "events.parquet", [])
-    assert Object.resource_snapshot().s3_clients_created == opened.s3_clients_created
+    assert Store.resource_snapshot().s3_clients_created == opened.s3_clients_created
   end
 
   defp options(prefix) do

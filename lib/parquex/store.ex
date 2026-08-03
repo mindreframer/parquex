@@ -17,10 +17,26 @@ defmodule Parquex.Store do
 
   """
 
-  alias Parquex.{Error, Location, Native}
+  alias Parquex.{Error, Native}
   alias Parquex.Store.{Metadata, Writer}
 
   @default_max_range_bytes 8 * 1024 * 1024
+  @default_s3_options %{
+    region: "us-east-1",
+    endpoint: nil,
+    path_style: false,
+    tls: true,
+    request_timeout_ms: 30_000,
+    max_retries: 3,
+    credential_provider: :standard,
+    max_request_concurrency: 4,
+    multipart_part_size: 8 * 1024 * 1024,
+    max_in_flight_parts: 2,
+    max_range_bytes: @default_max_range_bytes
+  }
+  @s3_keys Map.keys(@default_s3_options) ++
+             [:access_key_id, :secret_access_key, :session_token]
+  @credential_keys ~w(access_key access_key_id authorization credential credentials password secret secret_access_key session_token token)a
 
   @enforce_keys [:backend, :options, :secret_keys]
   defstruct [
@@ -71,20 +87,23 @@ defmodule Parquex.Store do
   def open(:s3, options) when is_list(options) do
     with :ok <- validate_keyword(options, :store_open),
          {:ok, bucket} <- required_binary(options, :bucket),
+         bucket = String.downcase(bucket),
          {:ok, prefix} <- normalize_prefix(Keyword.get(options, :prefix, ""), allow_empty: true),
-         location_options <-
-           options |> Keyword.drop([:bucket, :prefix]) |> infer_credential_provider(),
-         {:ok, location} <- Location.new(s3_uri(bucket, prefix), location_options),
+         raw_options <- options |> Keyword.drop([:bucket, :prefix]) |> infer_credential_provider(),
+         {:ok, normalized, secret_keys} <- normalize_s3_options(raw_options),
          {:ok, resource} <-
-           native_result(Native.store_open_s3(Location.native_s3_config(location)), :store_open) do
+           native_result(
+             Native.store_open_s3(native_s3_config(bucket, prefix, normalized)),
+             :store_open
+           ) do
       {:ok,
        %__MODULE__{
          backend: :s3,
-         bucket: Location.s3_bucket(location),
+         bucket: bucket,
          prefix: prefix,
          resource: resource,
-         options: location.options,
-         secret_keys: location.secret_keys
+         options: normalized,
+         secret_keys: secret_keys
        }}
     end
   end
@@ -123,6 +142,16 @@ defmodule Parquex.Store do
 
   def identity(_store), do: invalid(:store_identity, "expected an open store")
 
+  @doc false
+  @spec resource_snapshot() :: map()
+  def resource_snapshot do
+    case Native.resource_snapshot() do
+      {:ok, snapshot} -> snapshot
+      {:error, payload} -> raise Error.from_native(payload)
+      other -> raise Error.invalid_native_response(:resource_snapshot, other)
+    end
+  end
+
   @doc "Returns metadata for one relative object key."
   @spec head(t(), String.t()) :: {:ok, Metadata.t()} | {:error, Error.t()}
   def head(%__MODULE__{} = store, key) do
@@ -140,11 +169,14 @@ defmodule Parquex.Store do
   def read_range(%__MODULE__{} = store, key, offset, length)
       when is_integer(offset) and offset >= 0 and is_integer(length) and length >= 0 do
     with {:ok, key} <- normalize_key(key),
-         :ok <- ensure_bounded(store, length) do
-      native_result(
-        Native.store_read_range(store.resource, key, offset, length),
-        :store_read_range
-      )
+         :ok <- ensure_bounded(store, length),
+         {:ok, bytes} <-
+           native_result(
+             Native.store_read_range(store.resource, key, offset, length),
+             :store_read_range
+           ) do
+      Parquex.Telemetry.storage(:read_range, store, %{bytes: byte_size(bytes)})
+      {:ok, bytes}
     end
   end
 
@@ -311,9 +343,6 @@ defmodule Parquex.Store do
     end)
   end
 
-  defp s3_uri(bucket, ""), do: "s3://#{bucket}"
-  defp s3_uri(bucket, prefix), do: "s3://#{bucket}/#{String.trim_trailing(prefix, "/")}"
-
   defp infer_credential_provider(options) do
     if Keyword.has_key?(options, :credential_provider) or
          not Keyword.has_key?(options, :access_key_id) do
@@ -322,6 +351,183 @@ defmodule Parquex.Store do
       Keyword.put(options, :credential_provider, :explicit)
     end
   end
+
+  defp normalize_s3_options(options) do
+    values = Map.new(options)
+
+    with :ok <- reject_s3_unknown(values),
+         {:ok, endpoint} <- normalize_endpoint(Map.get(values, :endpoint)),
+         {:ok, region} <- non_empty_string(Map.get(values, :region, "us-east-1"), :region),
+         {:ok, path_style} <- boolean_option(Map.get(values, :path_style, false), :path_style),
+         {:ok, tls} <- boolean_option(Map.get(values, :tls, true), :tls),
+         :ok <- validate_endpoint_tls(endpoint, tls),
+         {:ok, timeout} <-
+           bounded_positive(
+             Map.get(values, :request_timeout_ms, 30_000),
+             300_000,
+             :request_timeout_ms
+           ),
+         {:ok, retries} <-
+           bounded_non_negative(Map.get(values, :max_retries, 3), 10, :max_retries),
+         {:ok, provider} <-
+           credential_provider(Map.get(values, :credential_provider, :standard), values),
+         {:ok, concurrency} <-
+           bounded_positive(
+             Map.get(values, :max_request_concurrency, 4),
+             64,
+             :max_request_concurrency
+           ),
+         {:ok, part_size} <-
+           multipart_part_size(Map.get(values, :multipart_part_size, 8 * 1024 * 1024)),
+         {:ok, in_flight} <-
+           bounded_positive(Map.get(values, :max_in_flight_parts, 2), 16, :max_in_flight_parts),
+         {:ok, max_range} <-
+           bounded_positive(
+             Map.get(values, :max_range_bytes, @default_max_range_bytes),
+             4_294_967_295,
+             :max_range_bytes
+           ) do
+      normalized =
+        Map.merge(@default_s3_options, values)
+        |> Map.merge(%{
+          endpoint: endpoint,
+          region: region,
+          path_style: path_style,
+          tls: tls,
+          request_timeout_ms: timeout,
+          max_retries: retries,
+          credential_provider: provider,
+          max_request_concurrency: concurrency,
+          multipart_part_size: part_size,
+          max_in_flight_parts: in_flight,
+          max_range_bytes: max_range
+        })
+
+      secret_keys =
+        normalized
+        |> Map.keys()
+        |> Enum.filter(&credential_key?/1)
+        |> MapSet.new()
+
+      {:ok, normalized, secret_keys}
+    end
+  end
+
+  defp native_s3_config(bucket, prefix, options) do
+    %{
+      bucket: bucket,
+      key: String.trim_trailing(prefix, "/"),
+      endpoint: options.endpoint,
+      region: options.region,
+      path_style: options.path_style,
+      tls: options.tls,
+      request_timeout_ms: options.request_timeout_ms,
+      max_retries: options.max_retries,
+      credential_provider: options.credential_provider,
+      access_key_id: Map.get(options, :access_key_id),
+      secret_access_key: Map.get(options, :secret_access_key),
+      session_token: Map.get(options, :session_token),
+      max_request_concurrency: options.max_request_concurrency,
+      multipart_part_size: options.multipart_part_size,
+      max_in_flight_parts: options.max_in_flight_parts
+    }
+  end
+
+  defp reject_s3_unknown(options) do
+    case Map.keys(options) -- @s3_keys do
+      [] -> :ok
+      unknown -> invalid(:store_open, "unsupported S3 store options", %{options: unknown})
+    end
+  end
+
+  defp normalize_endpoint(nil), do: {:ok, nil}
+
+  defp normalize_endpoint(endpoint) when is_binary(endpoint) do
+    uri = URI.parse(endpoint)
+
+    if uri.scheme in ["http", "https"] and is_binary(uri.host) and uri.host != "" and
+         is_nil(uri.userinfo) and is_nil(uri.query) and is_nil(uri.fragment) and
+         uri.path in [nil, "", "/"] do
+      {:ok, String.trim_trailing(endpoint, "/")}
+    else
+      invalid(:store_open, "endpoint must be an HTTP(S) origin without credentials")
+    end
+  end
+
+  defp normalize_endpoint(_endpoint),
+    do: invalid(:store_open, "endpoint must be an HTTP(S) origin")
+
+  defp validate_endpoint_tls(nil, true), do: :ok
+
+  defp validate_endpoint_tls(nil, false),
+    do: invalid(:store_open, "tls can be false only with an HTTP endpoint")
+
+  defp validate_endpoint_tls("https://" <> _rest, true), do: :ok
+  defp validate_endpoint_tls("http://" <> _rest, false), do: :ok
+
+  defp validate_endpoint_tls(_endpoint, _tls),
+    do: invalid(:store_open, "endpoint scheme and tls option disagree")
+
+  defp non_empty_string(value, _key) when is_binary(value) and value != "", do: {:ok, value}
+
+  defp non_empty_string(_value, key),
+    do: invalid(:store_open, "#{key} must be a non-empty string")
+
+  defp boolean_option(value, _key) when is_boolean(value), do: {:ok, value}
+  defp boolean_option(_value, key), do: invalid(:store_open, "#{key} must be boolean")
+
+  defp bounded_positive(value, max, _key)
+       when is_integer(value) and value > 0 and value <= max,
+       do: {:ok, value}
+
+  defp bounded_positive(_value, _max, key),
+    do: invalid(:store_open, "#{key} must be a positive bounded integer")
+
+  defp bounded_non_negative(value, max, _key)
+       when is_integer(value) and value >= 0 and value <= max,
+       do: {:ok, value}
+
+  defp bounded_non_negative(_value, _max, key),
+    do: invalid(:store_open, "#{key} must be a bounded non-negative integer")
+
+  defp credential_provider(:standard, options) do
+    if Enum.any?(
+         [:access_key_id, :secret_access_key, :session_token],
+         &Map.has_key?(options, &1)
+       ),
+       do: invalid(:store_open, "explicit credentials require credential_provider: :explicit"),
+       else: {:ok, :standard}
+  end
+
+  defp credential_provider(:explicit, options) do
+    with {:ok, _access} <- non_empty_string(Map.get(options, :access_key_id), :access_key_id),
+         {:ok, _secret} <-
+           non_empty_string(Map.get(options, :secret_access_key), :secret_access_key),
+         :ok <- optional_string(Map.get(options, :session_token), :session_token) do
+      {:ok, :explicit}
+    end
+  end
+
+  defp credential_provider(_provider, _options),
+    do: invalid(:store_open, "credential_provider must be :standard or :explicit")
+
+  defp optional_string(nil, _key), do: :ok
+  defp optional_string(value, _key) when is_binary(value) and value != "", do: :ok
+  defp optional_string(_value, key), do: invalid(:store_open, "#{key} must be a non-empty string")
+
+  defp multipart_part_size(value)
+       when is_integer(value) and value >= 5 * 1024 * 1024 and value <= 512 * 1024 * 1024,
+       do: {:ok, value}
+
+  defp multipart_part_size(_value),
+    do: invalid(:store_open, "multipart_part_size must be between 5 MiB and 512 MiB")
+
+  defp credential_key?(key) when is_atom(key) do
+    key in @credential_keys or
+      String.contains?(Atom.to_string(key), ["secret", "password", "token"])
+  end
+
+  defp credential_key?(_key), do: false
 
   defp relative_segments?(key) do
     not String.starts_with?(key, ["/", "\\"]) and

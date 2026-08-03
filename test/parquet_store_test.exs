@@ -1,7 +1,7 @@
 defmodule Parquex.ParquetStoreTest do
   use Parquex.FixtureCase, async: false
 
-  alias Parquex.{Batch, Error, Object, Schema, Store}
+  alias Parquex.{Batch, Error, Schema, Store}
 
   test "finite event rows infer, write with Zstandard, and materialize", %{tmp_dir: tmp_dir} do
     {:ok, store} = Store.open(:local, root: tmp_dir, max_range_bytes: 64 * 1024)
@@ -92,11 +92,43 @@ defmodule Parquex.ParquetStoreTest do
     assert :ok = Parquex.Writer.write_batch(writer, batch)
     assert {:ok, _metadata} = Parquex.Writer.close(writer)
 
-    before = Object.resource_snapshot()
+    before = Store.resource_snapshot()
     assert {:ok, stream} = Parquex.stream(store, "streamed.parquet", batch_size: 1)
-    assert Object.resource_snapshot().active_readers == before.active_readers + 1
+    assert Store.resource_snapshot().active_readers == before.active_readers + 1
     assert [%Batch{}] = Enum.take(stream, 1)
-    assert Object.resource_snapshot().active_readers == before.active_readers
+    assert Store.resource_snapshot().active_readers == before.active_readers
+  end
+
+  test "reads fixture schemas and values through a local store", %{tmp_dir: tmp_dir} do
+    materialize_fixture("all_types", tmp_dir)
+    {:ok, store} = Store.open(:local, root: tmp_dir, max_range_bytes: 64 * 1_024)
+
+    assert {:ok, %Schema{} = schema} = Parquex.schema(store, "all_types.parquet", [])
+    assert {:ok, %{type: {:decimal, 128, 10, 2}}} = Schema.field(schema, "amount")
+
+    assert {:ok, stream} =
+             Parquex.stream(store, "all_types.parquet",
+               batch_size: 2,
+               columns: ["signed", "payload", "numbers"]
+             )
+
+    batches = Enum.to_list(stream)
+    assert Enum.map(batches, &Batch.row_count/1) == [2, 2, 2]
+
+    assert {:ok, [-1, 2]} = batches |> hd() |> Batch.column("signed")
+    assert {:ok, [<<97, 0>>, nil]} = batches |> hd() |> Batch.column("payload")
+    assert {:ok, [[1, nil, 3], nil]} = batches |> hd() |> Batch.column("numbers")
+    assert {:ok, %{active: false}} = Parquex.Stream.stats(stream)
+  end
+
+  test "reports malformed fixture data without exposing its key", %{tmp_dir: tmp_dir} do
+    File.write!(Path.join(tmp_dir, "malformed-secret.parquet"), "not parquet")
+    {:ok, store} = Store.open(:local, root: tmp_dir)
+
+    assert {:error, %Error{category: :malformed_data} = error} =
+             Parquex.stream(store, "malformed-secret.parquet")
+
+    refute inspect(error) =~ "malformed-secret"
   end
 
   defp event_rows do

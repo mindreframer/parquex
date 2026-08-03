@@ -1,7 +1,7 @@
 defmodule Parquex.DatasetStreamS3IntegrationTest do
   use Parquex.RustFSCase, async: false
 
-  alias Parquex.{Dataset, Object, Schema, Store}
+  alias Parquex.{Dataset, Schema, Store}
 
   @bucket "parquex-test"
   @access "parquex-test-access"
@@ -42,7 +42,7 @@ defmodule Parquex.DatasetStreamS3IntegrationTest do
   test "RustFS range streaming is exact, bounded, and reuses one S3 client", %{
     dataset: dataset
   } do
-    before = Object.resource_snapshot()
+    before = Store.resource_snapshot()
 
     assert {:ok, rows} =
              Dataset.read(dataset,
@@ -53,7 +53,7 @@ defmodule Parquex.DatasetStreamS3IntegrationTest do
              )
 
     assert rows == [%{"id" => 2}, %{"id" => 3}]
-    after_read = Object.resource_snapshot()
+    after_read = Store.resource_snapshot()
     assert after_read.active_readers == before.active_readers
     assert after_read.s3_clients_created == before.s3_clients_created
 
@@ -64,7 +64,7 @@ defmodule Parquex.DatasetStreamS3IntegrationTest do
              )
 
     assert [_batch] = Enum.take(stream, 1)
-    assert Object.resource_snapshot().active_readers == before.active_readers
+    assert Store.resource_snapshot().active_readers == before.active_readers
   end
 
   defp row(datetime, id),

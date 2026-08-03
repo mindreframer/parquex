@@ -1,7 +1,7 @@
 defmodule Parquex.DatasetWriterTest do
   use Parquex.FixtureCase, async: false
 
-  alias Parquex.{Dataset, Error, Object, Schema, Store}
+  alias Parquex.{Dataset, Error, Schema, Store}
   alias Parquex.Dataset.{Part, WriteReport, Writer}
 
   test "every granularity writes canonical independently readable parts", %{tmp_dir: tmp_dir} do
@@ -68,18 +68,18 @@ defmodule Parquex.DatasetWriterTest do
   } do
     {:ok, store} = Store.open(:local, root: tmp_dir)
     dataset = dataset(store, "disordered", :hour)
-    before = Object.resource_snapshot()
+    before = Store.resource_snapshot()
     {:ok, writer} = Dataset.open_writer(dataset, max_open_partitions: 1, batch_rows: 1)
 
     for {hour, id} <- [{12, 1}, {13, 2}, {12, 3}, {14, 4}] do
       at = DateTime.new!(~D[2026-08-03], Time.new!(hour, 0, 0))
       assert :ok = Writer.write(writer, %{"at" => micros(at), "id" => id})
-      assert Object.resource_snapshot().active_writers <= before.active_writers + 1
+      assert Store.resource_snapshot().active_writers <= before.active_writers + 1
     end
 
     assert {:ok, %WriteReport{parts: parts, rows: 4}} = Writer.close(writer)
     assert length(parts) == 4
-    assert Object.resource_snapshot().active_writers == before.active_writers
+    assert Store.resource_snapshot().active_writers == before.active_writers
 
     assert {:ok, %WriteReport{parts: [%Part{} = late], rows: 1}} =
              Dataset.write(dataset, [%{"at" => micros(~U[2026-08-03 12:30:00Z]), "id" => 5}])
@@ -102,11 +102,11 @@ defmodule Parquex.DatasetWriterTest do
     assert {:ok, %WriteReport{rows: 5}} = Dataset.write(dataset, stream, batch_rows: 2)
     assert {:ok, %WriteReport{parts: [], rows: 0, bytes: 0}} = Dataset.write(dataset, [])
 
-    before = Object.resource_snapshot()
+    before = Store.resource_snapshot()
     {:ok, writer} = Dataset.open_writer(dataset, batch_rows: 1)
     assert :ok = Writer.write(writer, %{"at" => micros(~U[2026-08-04 00:00:00Z]), "id" => 9})
     assert :ok = Writer.cancel(writer)
-    assert Object.resource_snapshot().active_writers == before.active_writers
+    assert Store.resource_snapshot().active_writers == before.active_writers
 
     parent = self()
 
@@ -121,7 +121,7 @@ defmodule Parquex.DatasetWriterTest do
     assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}
     Process.sleep(20)
     assert {:error, %Error{}} = Writer.write(owned, %{"at" => 0, "id" => 11})
-    assert Object.resource_snapshot().active_writers == before.active_writers
+    assert Store.resource_snapshot().active_writers == before.active_writers
   end
 
   test "invalid and null timestamps publish no partial object", %{tmp_dir: tmp_dir} do
@@ -138,7 +138,7 @@ defmodule Parquex.DatasetWriterTest do
   test "producer failure cancels every active partition writer", %{tmp_dir: tmp_dir} do
     {:ok, store} = Store.open(:local, root: tmp_dir)
     dataset = dataset(store, "producer-failure", :hour)
-    before = Object.resource_snapshot()
+    before = Store.resource_snapshot()
 
     input =
       Stream.map(1..4, fn
@@ -150,7 +150,7 @@ defmodule Parquex.DatasetWriterTest do
       Dataset.write(dataset, input, max_open_partitions: 3, batch_rows: 1)
     end
 
-    assert Object.resource_snapshot().active_writers == before.active_writers
+    assert Store.resource_snapshot().active_writers == before.active_writers
   end
 
   defp dataset(store, prefix, granularity) do

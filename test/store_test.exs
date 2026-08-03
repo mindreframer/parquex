@@ -1,7 +1,7 @@
 defmodule Parquex.StoreTest do
   use Parquex.FixtureCase, async: false
 
-  alias Parquex.{Error, Object, Store}
+  alias Parquex.{Error, Store}
   alias Parquex.Store.Metadata
 
   test "one local store handle serves bounded key-based object operations", %{tmp_dir: tmp_dir} do
@@ -51,7 +51,7 @@ defmodule Parquex.StoreTest do
 
   test "writer cancellation and owner exit clean native state", %{tmp_dir: tmp_dir} do
     assert {:ok, store} = Store.open(:local, root: tmp_dir)
-    before = Object.resource_snapshot()
+    before = Store.resource_snapshot()
     parent = self()
 
     {pid, monitor} =
@@ -63,11 +63,11 @@ defmodule Parquex.StoreTest do
       end)
 
     assert_receive {:ready, writer}
-    assert Object.resource_snapshot().active_writers == before.active_writers + 1
+    assert Store.resource_snapshot().active_writers == before.active_writers + 1
     send(pid, :stop)
     assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}
     assert {:error, %Error{category: :cancelled}} = Store.write(writer, "more")
     refute File.exists?(Path.join(tmp_dir, "owner/value.bin"))
-    assert Object.resource_snapshot().active_writers == before.active_writers
+    assert Store.resource_snapshot().active_writers == before.active_writers
   end
 end

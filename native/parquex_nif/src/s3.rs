@@ -138,13 +138,6 @@ impl Debug for RemoteObject {
 }
 
 impl RemoteObject {
-    pub(crate) fn new(config: S3Config) -> Result<Self, NativeFailure> {
-        let key = config.key.clone();
-        let mut store_config = config;
-        store_config.key.clear();
-        RemoteStore::new(store_config)?.object(&key)
-    }
-
     pub(crate) fn head(
         &self,
         cancellation: &CancellationToken,

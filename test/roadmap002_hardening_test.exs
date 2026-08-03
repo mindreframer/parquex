@@ -1,7 +1,7 @@
 defmodule Parquex.Roadmap002HardeningTest do
   use Parquex.FixtureCase, async: false
 
-  alias Parquex.{Dataset, Object, Schema, Store}
+  alias Parquex.{Dataset, Schema, Store}
 
   @tag timeout: 120_000
   test "real event-shaped rows round-trip across every granularity and release codec", %{
@@ -97,7 +97,7 @@ defmodule Parquex.Roadmap002HardeningTest do
   end
 
   defp live_resources do
-    snapshot = Object.resource_snapshot()
+    snapshot = Store.resource_snapshot()
 
     Map.take(snapshot, [
       :active_writers,

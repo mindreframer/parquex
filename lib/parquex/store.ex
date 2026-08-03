@@ -223,7 +223,7 @@ defmodule Parquex.Store do
 
   def delete(_store, _key), do: invalid(:store_delete, "expected an open store")
 
-  @doc "Opens a create-only staged writer for a relative key."
+  @doc "Opens a writer for a relative key."
   @spec open_writer(t(), String.t(), keyword()) :: {:ok, Writer.t()} | {:error, Error.t()}
   def open_writer(store, key, options \\ [])
 
@@ -267,7 +267,7 @@ defmodule Parquex.Store do
 
   def write(_writer, _data), do: invalid(:store_writer_write, "expected an open writer")
 
-  @doc "Publishes a staged writer without replacing an existing object."
+  @doc "Completes a writer, replacing the key when it already exists."
   @spec publish(Writer.t()) :: {:ok, Metadata.t()} | {:error, Error.t()}
   def publish(%Writer{resource: resource, key: key}) do
     with {:ok, metadata} <-
@@ -278,7 +278,7 @@ defmodule Parquex.Store do
 
   def publish(_writer), do: invalid(:store_writer_publish, "expected an open writer")
 
-  @doc "Cancels a staged writer and cleans its owned staging object."
+  @doc "Cancels an open writer and discards its incomplete data."
   @spec cancel(Writer.t()) :: :ok | {:error, Error.t()}
   def cancel(%Writer{resource: resource}) do
     case native_result(Native.store_writer_abort(resource), :store_writer_abort) do
@@ -289,7 +289,7 @@ defmodule Parquex.Store do
 
   def cancel(_writer), do: invalid(:store_writer_abort, "expected an open writer")
 
-  @doc "Consumes bounded chunks and create-only publishes one object."
+  @doc "Consumes bounded chunks and writes one object."
   @spec put(t(), String.t(), Enumerable.t(), keyword()) ::
           {:ok, Metadata.t()} | {:error, Error.t()}
   def put(%__MODULE__{} = store, key, chunks, options \\ []) do

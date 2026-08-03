@@ -21,10 +21,10 @@ defmodule Parquex.StoreTest do
     assert {:ok, [%Metadata{key: "nested/value.bin"}]} = Store.list(store, "nested")
     assert {:ok, ^identity} = Store.identity(store)
 
-    assert {:error, %Error{category: :conflict}} =
+    assert {:ok, %Metadata{key: "nested/value.bin", size: 11}} =
              Store.put(store, "nested/value.bin", ["replacement"])
 
-    assert {:ok, "0123456789"} = Store.read(store, "nested/value.bin")
+    assert {:ok, "replacement"} = Store.read(store, "nested/value.bin")
     assert :ok = Store.delete(store, "nested/value.bin")
     assert {:error, %Error{category: :not_found}} = Store.head(store, "nested/value.bin")
   end
@@ -68,6 +68,28 @@ defmodule Parquex.StoreTest do
     assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}
     assert {:error, %Error{category: :cancelled}} = Store.write(writer, "more")
     refute File.exists?(Path.join(tmp_dir, "owner/value.bin"))
+    assert Store.resource_snapshot().active_writers == before.active_writers
+  end
+
+  test "cancel preserves an existing value and last completion wins", %{tmp_dir: tmp_dir} do
+    assert {:ok, store} = Store.open(:local, root: tmp_dir)
+    assert {:ok, _metadata} = Store.put(store, "value.bin", ["original"])
+    before = Store.resource_snapshot()
+
+    assert {:ok, cancelled} = Store.open_writer(store, "value.bin")
+    assert :ok = Store.write(cancelled, "discarded")
+    assert {:ok, "original"} = Store.read(store, "value.bin")
+    assert :ok = Store.cancel(cancelled)
+    assert {:ok, "original"} = Store.read(store, "value.bin")
+
+    assert {:ok, first} = Store.open_writer(store, "value.bin")
+    assert {:ok, second} = Store.open_writer(store, "value.bin")
+    assert :ok = Store.write(first, "first")
+    assert :ok = Store.write(second, "second")
+    assert {:ok, _metadata} = Store.publish(first)
+    assert {:ok, "first"} = Store.read(store, "value.bin")
+    assert {:ok, _metadata} = Store.publish(second)
+    assert {:ok, "second"} = Store.read(store, "value.bin")
     assert Store.resource_snapshot().active_writers == before.active_writers
   end
 end

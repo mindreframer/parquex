@@ -29,6 +29,10 @@ defmodule Parquex.ParquetStoreTest do
                where: {:gt, "sequence", 1},
                batch_size: 1
              )
+
+    replacement = [hd(rows)]
+    assert {:ok, _metadata} = Parquex.write(store, "events/part.parquet", replacement)
+    assert {:ok, ^replacement} = Parquex.read(store, "events/part.parquet")
   end
 
   test "column maps and explicit empty nullable schemas are supported", %{tmp_dir: tmp_dir} do

@@ -36,6 +36,10 @@ defmodule Parquex.ParquetStoreS3IntegrationTest do
     assert {:ok, _metadata} = Parquex.write(store, "events.parquet", rows, compression: :zstd)
     assert {:ok, ^rows} = Parquex.read(store, "events.parquet", batch_size: 1)
     assert {:ok, _schema} = Parquex.schema(store, "events.parquet", [])
+
+    replacement = [List.last(rows)]
+    assert {:ok, _metadata} = Parquex.write(store, "events.parquet", replacement)
+    assert {:ok, ^replacement} = Parquex.read(store, "events.parquet")
     assert Store.resource_snapshot().s3_clients_created == opened.s3_clients_created
   end
 

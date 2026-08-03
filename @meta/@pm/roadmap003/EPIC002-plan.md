@@ -2,11 +2,11 @@
 
 ## Progress
 
-- [ ] Phase 2.1: Replace remote staging/copy with direct multipart upload.
-- [ ] Phase 2.2: Implement normal local replacement.
-- [ ] Phase 2.3: Remove create-only configuration and errors.
-- [ ] Phase 2.4: Prove replacement, cancellation and cleanup.
-- [ ] Phase 2.5: Pass QA, review and commit.
+- [x] Phase 2.1: Replace remote staging/copy with direct multipart upload.
+- [x] Phase 2.2: Implement normal local replacement.
+- [x] Phase 2.3: Remove create-only configuration and errors.
+- [x] Phase 2.4: Prove replacement, cancellation and cleanup.
+- [x] Phase 2.5: Pass QA, review and commit.
 
 ## Implementation Steps
 
@@ -22,12 +22,12 @@
 
 ## Quality Gate
 
-- [ ] Direct S3 writes use no copy or conditional operation.
-- [ ] Existing keys are replaced locally and remotely.
-- [ ] Cancellation and owner exit do not complete new objects.
-- [ ] Active multipart/resource counts return to baseline.
-- [ ] RustFS and Wasabi probes pass.
-- [ ] `bin/qa_check.sh` passes.
+- [x] Direct S3 writes use no copy or conditional operation.
+- [x] Existing keys are replaced locally and remotely.
+- [x] Cancellation and owner exit do not complete new objects.
+- [x] Active multipart/resource counts return to baseline.
+- [x] RustFS and Wasabi probes pass.
+- [x] `bin/qa_check.sh` passes.
 
 ## Commit Rule
 

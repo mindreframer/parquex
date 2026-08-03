@@ -6,7 +6,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use futures_util::TryStreamExt;
-use object_store::aws::{AmazonS3Builder, S3CopyIfNotExists};
+use object_store::aws::AmazonS3Builder;
 use object_store::client::ClientOptions;
 use object_store::limit::LimitStore;
 use object_store::path::Path;
@@ -24,7 +24,6 @@ static PEAK_REQUESTS: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE_MULTIPART: AtomicUsize = AtomicUsize::new(0);
 static RANGE_REQUESTS: AtomicU64 = AtomicU64::new(0);
 static RANGE_BYTES: AtomicU64 = AtomicU64::new(0);
-static STAGE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static CLIENTS_CREATED: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, rustler::NifMap)]
@@ -211,31 +210,13 @@ impl RemoteObject {
         &self,
         cancellation: Arc<CancellationToken>,
     ) -> Result<RemoteMultipartWriter, NativeFailure> {
-        let sequence = STAGE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let (parent, name) = self
-            .config
-            .key
-            .rsplit_once('/')
-            .map_or(("", self.config.key.as_str()), |(parent, name)| {
-                (parent, name)
-            });
-        let stage_name = format!(".{name}.parquex-{}-{sequence}.tmp", std::process::id());
-        let stage_key = if parent.is_empty() {
-            stage_name
-        } else {
-            format!("{parent}/{stage_name}")
-        };
-        let stage_path = Path::parse(stage_key).map_err(|_| {
-            NativeFailure::invalid(Operation::S3WriterOpen, "S3 staging key is invalid")
-        })?;
         let upload = remote_call(Operation::S3WriterOpen, Some(&cancellation), || {
-            self.store.put_multipart(&stage_path)
+            self.store.put_multipart(&self.path)
         })?;
         ACTIVE_MULTIPART.fetch_add(1, Ordering::Relaxed);
         Ok(RemoteMultipartWriter {
             store: self.store.clone(),
             destination: self.path.clone(),
-            stage: stage_path,
             upload: Some(WriteMultipart::new_with_chunk_size(
                 upload,
                 self.config.multipart_part_size,
@@ -251,7 +232,6 @@ impl RemoteObject {
 pub(crate) struct RemoteMultipartWriter {
     store: Arc<dyn ObjectStore>,
     destination: Path,
-    stage: Path,
     upload: Option<WriteMultipart>,
     cancellation: Arc<CancellationToken>,
     max_in_flight_parts: usize,
@@ -269,33 +249,13 @@ impl RemoteMultipartWriter {
         let completed = remote_call(Operation::S3WriterPublish, Some(&self.cancellation), || {
             upload.finish()
         });
-        if let Err(error) = completed {
-            let _cleanup = remote_call(Operation::S3WriterAbort, None, || {
-                self.store.delete(&self.stage)
-            });
-            self.finish_active();
-            return Err(error);
-        }
-
-        let copy_result = remote_call(Operation::S3WriterPublish, Some(&self.cancellation), || {
-            self.store
-                .copy_if_not_exists(&self.stage, &self.destination)
-        });
-        let cleanup_result = remote_call(Operation::S3WriterAbort, None, || {
-            self.store.delete(&self.stage)
-        });
         self.finish_active();
+        completed?;
 
-        match publication_result(copy_result, cleanup_result) {
-            Ok(()) => {
-                let metadata =
-                    remote_call(Operation::S3WriterPublish, Some(&self.cancellation), || {
-                        self.store.head(&self.destination)
-                    })?;
-                Ok(remote_metadata(metadata))
-            }
-            Err(error) => Err(error),
-        }
+        let metadata = remote_call(Operation::S3WriterPublish, Some(&self.cancellation), || {
+            self.store.head(&self.destination)
+        })?;
+        Ok(remote_metadata(metadata))
     }
 
     pub(crate) fn abort(&mut self) -> Result<bool, NativeFailure> {
@@ -307,9 +267,6 @@ impl RemoteMultipartWriter {
             Some(upload) => remote_call(Operation::S3WriterAbort, None, || upload.abort()),
             None => Ok(()),
         };
-        let _cleanup = remote_call(Operation::S3WriterAbort, None, || {
-            self.store.delete(&self.stage)
-        });
         self.finish_active();
         abort_result.map(|()| true)
     }
@@ -319,20 +276,6 @@ impl RemoteMultipartWriter {
             self.active = false;
             ACTIVE_MULTIPART.fetch_sub(1, Ordering::Relaxed);
         }
-    }
-}
-
-fn publication_result(
-    copy_result: Result<(), NativeFailure>,
-    cleanup_result: Result<(), NativeFailure>,
-) -> Result<(), NativeFailure> {
-    match (copy_result, cleanup_result) {
-        (Ok(()), Ok(())) => Ok(()),
-        (Err(primary), _cleanup) => Err(primary),
-        (Ok(()), Err(_cleanup)) => Err(NativeFailure::expected(
-            Operation::S3WriterPublish,
-            "S3 destination published but staging cleanup failed",
-        )),
     }
 }
 
@@ -438,8 +381,7 @@ fn build_store(config: &S3Config) -> Result<Arc<dyn ObjectStore>, NativeFailure>
             ClientOptions::new()
                 .with_timeout(timeout)
                 .with_allow_http(!config.tls),
-        )
-        .with_copy_if_not_exists(S3CopyIfNotExists::Multipart);
+        );
     if let Some(endpoint) = &config.endpoint {
         builder = builder.with_endpoint(endpoint);
     }
@@ -544,36 +486,5 @@ fn join_key(base: &str, suffix: &str) -> String {
         ("", suffix) => suffix.to_owned(),
         (base, "") => base.to_owned(),
         (base, suffix) => format!("{base}/{suffix}"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn publication_cleanup_never_hides_the_primary_failure() {
-        let primary = NativeFailure::expected(Operation::S3WriterPublish, "primary");
-        let cleanup = NativeFailure::expected(Operation::S3WriterAbort, "cleanup");
-
-        assert_eq!(
-            publication_result(Err(primary), Err(cleanup)),
-            Err(NativeFailure::expected(
-                Operation::S3WriterPublish,
-                "primary"
-            ))
-        );
-    }
-
-    #[test]
-    fn publication_reports_cleanup_failure_after_success() {
-        let cleanup = NativeFailure::expected(Operation::S3WriterAbort, "cleanup");
-        let error = publication_result(Ok(()), Err(cleanup)).unwrap_err();
-
-        assert_eq!(error.operation, Operation::S3WriterPublish);
-        assert_eq!(
-            error.message,
-            "S3 destination published but staging cleanup failed"
-        );
     }
 }

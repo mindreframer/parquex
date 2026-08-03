@@ -1,6 +1,6 @@
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -266,7 +266,7 @@ impl StagedWrite for LocalWriter {
         };
 
         self.file.take();
-        if let Err(error) = fs::hard_link(&self.stage_path, &self.destination) {
+        if let Err(error) = replace_file(&self.stage_path, &self.destination) {
             self.cleanup_stage();
             return Err(NativeFailure::from_io(Operation::WriterPublish, &error));
         }
@@ -278,20 +278,13 @@ impl StagedWrite for LocalWriter {
                 .and_then(|parent| File::open(parent).ok())
                 .and_then(|directory| directory.sync_all().ok());
             if parent_sync.is_none() {
-                let _ignored = fs::remove_file(&self.destination);
-                self.cleanup_stage();
+                self.finish();
                 return Err(NativeFailure::new(
                     Category::NativeFailure,
                     Operation::WriterPublish,
                     "destination directory sync failed",
                 ));
             }
-        }
-
-        if let Err(error) = fs::remove_file(&self.stage_path) {
-            let _ignored = fs::remove_file(&self.destination);
-            self.cleanup_stage();
-            return Err(NativeFailure::from_io(Operation::WriterPublish, &error));
         }
 
         self.finish();
@@ -314,6 +307,21 @@ impl StagedWrite for LocalWriter {
             Err(error) => Err(NativeFailure::from_io(Operation::WriterAbort, &error)),
         }
     }
+}
+
+#[cfg(not(windows))]
+fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    match fs::remove_file(destination) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    fs::rename(source, destination)
 }
 
 impl Write for LocalWriter {

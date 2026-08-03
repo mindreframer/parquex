@@ -9,10 +9,10 @@ issue.
 
 ## Credential handling
 
-S3 credentials remain per-location configuration. `Inspect` redacts explicit
-credential fields, and stable errors and telemetry omit locations, request
-headers, signed URLs, options, object keys, and row values. Applications must
-still keep location structs and their raw option maps out of untrusted hands.
+S3 credentials are configured on each store. `Inspect` redacts explicit
+credential fields, and errors and telemetry omit endpoints, request headers,
+signed URLs, options, object keys, and row values. Applications must keep store
+configuration out of untrusted hands.
 
 The credentials in `docker-compose.yml` and the test suite are fixed,
 localhost-only test values. Never reuse them outside the disposable RustFS
@@ -23,5 +23,5 @@ environment.
 Parquex parses untrusted Parquet metadata and data in pinned Rust Arrow/Parquet
 dependencies. Keep the supported dependency and Rust toolchain pins intact,
 review upstream security notices, and rerun `bin/qa_check.sh` after updates.
-Allowed local roots mitigate accidental path escape but are not an operating
+Local store roots mitigate accidental path escape but are not an operating
 system sandbox.

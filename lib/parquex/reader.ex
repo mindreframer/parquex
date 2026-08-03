@@ -62,9 +62,11 @@ defmodule Parquex.Reader do
   defp validate_columns(nil), do: {:ok, []}
 
   defp validate_columns(columns) when is_list(columns) do
-    if columns != [] and Enum.all?(columns, &(is_binary(&1) and &1 != "")) and
-         Enum.uniq(columns) == columns,
-       do: {:ok, columns},
+    names = Enum.map(columns, &normalize_name/1)
+
+    if names != [] and Enum.all?(names, &(is_binary(&1) and &1 != "")) and
+         Enum.uniq(names) == names,
+       do: {:ok, names},
        else: invalid_argument("columns must be a non-empty list of unique names")
   end
 
@@ -74,7 +76,9 @@ defmodule Parquex.Reader do
   defp validate_predicate(nil), do: {:ok, nil}
 
   defp validate_predicate({operator, column, literal})
-       when operator in [:gt, :gte, :lt, :lte, :eq] and is_binary(column) and column != "" do
+       when operator in [:gt, :gte, :lt, :lte, :eq] do
+    column = normalize_name(column)
+
     literal_map =
       cond do
         is_boolean(literal) ->
@@ -93,13 +97,17 @@ defmodule Parquex.Reader do
           nil
       end
 
-    if literal_map,
+    if is_binary(column) and column != "" and literal_map,
       do: {:ok, %{operator: operator, column: column, literal: literal_map}},
       else: invalid_argument("predicate literal type is unsupported")
   end
 
   defp validate_predicate(_predicate),
     do: invalid_argument("where must be {operator, column, literal}")
+
+  defp normalize_name(name) when is_atom(name), do: Atom.to_string(name)
+  defp normalize_name(name) when is_binary(name), do: name
+  defp normalize_name(_name), do: nil
 
   defp native_result({:ok, result}), do: {:ok, result}
   defp native_result({:error, payload}), do: {:error, Error.from_native(payload)}

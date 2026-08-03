@@ -2,11 +2,11 @@
 
 ## Progress
 
-- [ ] Phase 4.1: Rewrite README around first use.
-- [ ] Phase 4.2: Replace the guide set with current focused documents.
-- [ ] Phase 4.3: Simplify module docs, changelog and package metadata.
-- [ ] Phase 4.4: Verify docs and unpacked package.
-- [ ] Phase 4.5: Pass QA, review and commit.
+- [x] Phase 4.1: Rewrite README around first use.
+- [x] Phase 4.2: Replace the guide set with current focused documents.
+- [x] Phase 4.3: Simplify module docs, changelog and package metadata.
+- [x] Phase 4.4: Verify docs and unpacked package.
+- [x] Phase 4.5: Pass QA, review and commit.
 
 ## Implementation Steps
 
@@ -22,12 +22,12 @@
 
 ## Quality Gate
 
-- [ ] README assumes no context and leads with runnable examples.
-- [ ] Published docs contain no historical/migration narrative.
-- [ ] Removed APIs and publication semantics are absent.
-- [ ] `mix docs --warnings-as-errors` passes.
-- [ ] Unpacked package contents are focused and complete.
-- [ ] `bin/qa_check.sh` passes.
+- [x] README assumes no context and leads with runnable examples.
+- [x] Published docs contain no historical/migration narrative.
+- [x] Removed APIs and publication semantics are absent.
+- [x] `mix docs --warnings-as-errors` passes.
+- [x] Unpacked package contents are focused and complete.
+- [x] `bin/qa_check.sh` passes.
 
 ## Commit Rule
 

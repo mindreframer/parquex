@@ -1,78 +1,89 @@
-# Reusable stores
+# Stores
 
-`Parquex.Store` is the primary storage boundary in 0.2. It owns one validated
-local root or S3-compatible namespace and one reusable native resource. Object
-operations receive relative UTF-8 keys, never URIs.
+`Parquex.Store` represents one local directory or one S3-compatible namespace. Open it once and pass it to object, Parquet, and dataset operations.
 
-## Opening
+## Local storage
+
+The root directory must already exist:
 
 ```elixir
-{:ok, local} =
+{:ok, store} =
   Parquex.Store.open(:local,
-    root: "/srv/application-data",
+    root: "/srv/my_app/data",
     max_range_bytes: 8 * 1024 * 1024
-  )
-
-{:ok, remote} =
-  Parquex.Store.open(:s3,
-    bucket: "events",
-    prefix: "tenant-a",
-    endpoint: "https://objects.example.com",
-    region: "us-east-1",
-    path_style: true,
-    credential_provider: :standard,
-    max_range_bytes: 8 * 1024 * 1024,
-    max_request_concurrency: 4,
-    multipart_part_size: 8 * 1024 * 1024,
-    max_in_flight_parts: 2
   )
 ```
 
-Explicit credentials use `credential_provider: :explicit`, `access_key_id`,
-`secret_access_key`, and optional `session_token`. Inspection redacts secrets.
-The process environment/provider chain is used for `:standard`.
+Keys are relative paths such as `events/part-1.parquet`. Absolute paths, parent traversal, empty path segments, backslashes, and symlink escapes are rejected.
 
-Local roots must already exist. Keys are normalized relative paths and cannot
-be absolute, contain parent traversal, empty segments, or backslashes. Native
-checks constrain local resolution beneath the canonical root and reject
-escaping symlinks.
+## S3-compatible storage
 
-## Finite and bounded operations
-
-- `head/2` returns key, size, and optional modification time.
-- `read_range/4` reads no more than the configured range bound.
-- `read/2` materializes a finite object using repeated bounded ranges.
-- `list/2` is deterministic and prefix-scoped.
-- `delete/2` deletes one exact key.
-- `put/4` consumes an enumerable one bounded iodata chunk at a time.
-
-For explicit lifecycle control:
+The standard credential provider reads the AWS environment and provider chain:
 
 ```elixir
-{:ok, writer} = Parquex.Store.open_writer(store, "objects/new.bin")
+{:ok, store} =
+  Parquex.Store.open(:s3,
+    bucket: "my-events",
+    prefix: "production",
+    region: "eu-central-1"
+  )
+```
+
+Explicit credentials and a custom endpoint are configured on the store:
+
+```elixir
+{:ok, store} =
+  Parquex.Store.open(:s3,
+    bucket: "my-events",
+    endpoint: "https://objects.example.com",
+    region: "us-east-1",
+    path_style: true,
+    credential_provider: :explicit,
+    access_key_id: System.fetch_env!("S3_ACCESS_KEY_ID"),
+    secret_access_key: System.fetch_env!("S3_SECRET_ACCESS_KEY")
+  )
+```
+
+Available transport bounds include:
+
+- `max_range_bytes`
+- `request_timeout_ms`
+- `max_retries`
+- `max_request_concurrency`
+- `multipart_part_size`
+- `max_in_flight_parts`
+
+Set `tls: false` only for an HTTP development service. Store inspection redacts credentials.
+
+## Object operations
+
+```elixir
+{:ok, metadata} = Parquex.Store.put(store, "health/value.bin", ["hello", " world"])
+{:ok, metadata} = Parquex.Store.head(store, "health/value.bin")
+{:ok, "hello"} = Parquex.Store.read_range(store, "health/value.bin", 0, 5)
+{:ok, "hello world"} = Parquex.Store.read(store, "health/value.bin")
+{:ok, objects} = Parquex.Store.list(store, "health")
+:ok = Parquex.Store.delete(store, "health/value.bin")
+```
+
+`read/2` materializes the complete object through bounded range reads. `read_range/4` rejects a range larger than the store's `max_range_bytes` setting.
+
+Use the chunk writer when input arrives over time:
+
+```elixir
+{:ok, writer} = Parquex.Store.open_writer(store, "objects/value.bin")
 :ok = Parquex.Store.write(writer, first_chunk)
 :ok = Parquex.Store.write(writer, second_chunk)
 {:ok, metadata} = Parquex.Store.publish(writer)
 ```
 
-`cancel/1` is idempotent after publication. Local writers use unique sibling
-staging files; S3 writers use bounded multipart staging objects. Publication is
-create-only and never replaces an existing destination.
+`Parquex.Store.cancel/1` discards an incomplete write. Writer ownership is tied to the process that opens it, so owner exit also cancels the write.
 
-## Reuse and ownership
+## Replacement
 
-An S3 client is built at `Store.open/2`, not per key. Parquet readers and
-writers borrow this store resource as well. Staged writers are monitored by the
-process that opens them; owner exit cancels and cleans active state.
+Publishing to an existing key replaces its value. For concurrent writes to the same key, the last successful completion wins.
 
-The internal object resource snapshot exposes active counts and cumulative
-range/client diagnostics for tests and troubleshooting. Those counters are
-diagnostic, not a compatibility-stable metrics protocol.
+Local writes use a unique sibling temporary file and replace the destination after the data is complete. S3 writes use multipart upload at the requested final key. Incomplete multipart uploads are aborted on cancellation when the provider accepts the abort request.
 
-## Failure semantics
+A connection failure during S3 multipart completion can make the final result uncertain. Inspect the key with `head/2` or `read/2` before retrying when application-level reconciliation matters.
 
-Errors use `Parquex.Error` categories such as `:not_found`, `:conflict`,
-`:permission_denied`, `:timeout`, `:cancelled`, and `:invalid_argument`.
-Messages are stable and redact backend internals, keys, and credentials.
-Remote publication can be ambiguous after a transport failure; callers may
-reconcile with `head/2` using their chosen immutable key.

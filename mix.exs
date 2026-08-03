@@ -8,8 +8,7 @@ defmodule Parquex.MixProject do
     [
       app: :parquex,
       version: @version,
-      description:
-        "Bounded Parquet objects and time-partitioned datasets for local and S3 storage",
+      description: "Parquet files and time datasets on local and S3-compatible storage",
       source_url: @source_url,
       homepage_url: @source_url,
       elixir: "~> 1.20",
@@ -42,18 +41,18 @@ defmodule Parquex.MixProject do
     [
       main: "readme",
       extras: [
-        "README.md",
+        {"README.md", [filename: "readme", title: "Parquex"]},
         "CHANGELOG.md",
         "SECURITY.md",
-        "docs/parquet-reads.md",
-        "docs/parquet-writes.md",
         "docs/stores.md",
+        "docs/parquet-files.md",
         "docs/datasets.md",
-        "docs/migration-0.2.md",
-        "docs/s3.md",
-        "docs/append-filtering.md",
         "docs/telemetry.md",
-        "docs/release.md"
+        "docs/runtime.md",
+        {"docs/architecture/README.md", [filename: "design", title: "Design"]},
+        "docs/architecture/storage.md",
+        "docs/architecture/streaming.md",
+        "docs/architecture/native-runtime.md"
       ]
     ]
   end

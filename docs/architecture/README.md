@@ -1,20 +1,15 @@
-# Architecture decisions
+# Design
 
-These decisions establish the constraints that later implementation epics must
-preserve:
+Parquex uses three small design boundaries:
 
-- [ADR 001: Pull-based streaming](001-pull-based-streaming.md)
-- [ADR 002: Backend-neutral storage](002-backend-neutral-storage.md)
-- [ADR 003: Columnar batch boundary](003-columnar-batches.md)
-- [ADR 004: Immutable publication](004-immutable-publication.md)
-- [ADR 005: Focused scope](005-focused-scope.md)
-- [ADR 006: Safe bounded-cardinality telemetry](006-safe-telemetry.md)
-- [ADR 007: Store- and dataset-centric public contract](007-store-dataset-contract.md)
-- [Native runtime and lifecycle rules](native-runtime.md)
-- [Object-access and local-publication contract](object-access.md)
-- [Streaming Parquet read contract](../parquet-reads.md)
-- [Streaming Parquet write contract](../parquet-writes.md)
+- [Storage](storage.md) owns local and S3-compatible namespaces and relative keys.
+- [Streaming](streaming.md) moves bounded columnar batches between Parquet and Elixir.
+- [Native lifecycle](native-runtime.md) owns scheduling, cancellation, and error containment.
 
-The roadmap is authoritative for feature sequencing. These records explain the
-constraints behind it and should be amended explicitly when a later decision
-supersedes one.
+The public flow is:
+
+```text
+Store + key -> Parquet file
+Store + prefix + time partition -> Parquet dataset
+```
+

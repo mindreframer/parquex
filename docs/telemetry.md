@@ -1,34 +1,26 @@
 # Telemetry
 
-Parquex emits bounded-cardinality events through `:telemetry`. Handlers are
-observational only and never participate in operation correctness.
+Parquex emits `:telemetry` events with bounded-cardinality measurements and metadata.
 
 ## Events
 
 | Event | Measurements | Metadata |
 | --- | --- | --- |
 | `[:parquex, :operation, :start]` | `:system_time` | `:operation`, `:backend`, `:source_count` |
-| `[:parquex, :operation, :stop]` | native-unit `:duration`, `:retryable_failures` | start fields plus `:status`, `:error_category` |
-| `[:parquex, :operation, :exception]` | native-unit `:duration` | start fields plus `:status`, `:exception_kind` |
+| `[:parquex, :operation, :stop]` | `:duration`, `:retryable_failures` | start fields plus `:status`, `:error_category` |
+| `[:parquex, :operation, :exception]` | `:duration` | start fields plus `:status`, `:exception_kind` |
 | `[:parquex, :storage]` | `:objects`, `:range_requests`, and/or `:bytes` | `:operation`, `:backend`, `:source_count` |
 | `[:parquex, :read, :batch]` | `:batches`, `:rows` | `:direction` |
 | `[:parquex, :write, :batch]` | `:batches`, `:rows` | `:direction` |
-| `[:parquex, :read, :stats]` | ranges, row groups, current/peak batch buffering | `:direction` |
-| `[:parquex, :write, :stats]` | rows/batches, encoder/input peaks, multipart limit | `:direction` |
+| `[:parquex, :read, :stats]` | range, row-group, and buffer counters | `:direction` |
+| `[:parquex, :write, :stats]` | row, batch, encoder, and multipart counters | `:direction` |
 | `[:parquex, :cancellation]` | `:cancellations` | `:kind`, `:backend`, `:source_count` |
 
-Durations use `System.monotonic_time/0` units and should be converted with
-`System.convert_time_unit/3`. Byte and count measurements are integers.
-`retryable_failures` counts completed logical operations classified as
-retryable; the object-store retry loop itself remains bounded by the
-per-location `:max_retries` setting.
+Durations use native monotonic time units. Convert them with `System.convert_time_unit/3`.
 
-Metadata values are atoms or integers only. Events never contain credentials,
-authorization material, endpoints, URIs, paths, buckets, object keys, signed
-URLs, option maps, schemas, column names, row contents, exception messages, or
-stack traces.
+Metadata contains atoms and integers. Events exclude credentials, endpoints, buckets, object keys, file paths, schemas, column names, row contents, exception messages, and stack traces.
 
-Example attachment:
+Attach a handler with the standard `:telemetry` API:
 
 ```elixir
 :telemetry.attach(
@@ -41,5 +33,5 @@ Example attachment:
 )
 ```
 
-Detach handlers during application shutdown or test cleanup with
-`:telemetry.detach/1`.
+Detach it during application shutdown or test cleanup with `:telemetry.detach/1`.
+

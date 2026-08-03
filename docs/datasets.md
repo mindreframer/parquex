@@ -1,8 +1,8 @@
-# UTC time-partitioned datasets
+# Time datasets
 
-`Parquex.Dataset` describes immutable Parquet parts beneath one store prefix.
-It fixes the schema, compression, timestamp column/unit, and UTC partition
-granularity.
+`Parquex.Dataset` groups Parquet files beneath UTC time folders. A dataset fixes its store, prefix, schema, timestamp column, time unit, partition granularity, and compression.
+
+## Define a dataset
 
 ```elixir
 schema =
@@ -22,105 +22,68 @@ dataset =
   )
 ```
 
-The timestamp field may be a matching Parquet timestamp or signed 64-bit
-integer in the configured unit. Supported units are second, millisecond,
-microsecond, and nanosecond.
+Granularity can be `:minute`, `:hour`, `:day`, `:week`, or `:month`.
 
-## Durable path convention
-
-Paths are canonical, unpadded Hive-style segments:
+Partition paths use canonical UTC values:
 
 ```text
-year=2026/month=8/day=3/hour=12/minute=30
-year=2026/month=8/day=3/hour=12
-year=2026/month=8/day=3
+year=2026/month=8/day=3/hour=10
 iso_year=2026/week=32
-year=2026/month=8
 ```
 
-`Parquex.TimePartition` calculates, strictly parses, and plans these paths in
-Rust. Week paths use ISO week-year. Custom time zones, fiscal calendars, and
-caller partition functions are not supported in 0.2.
-
-## Bounded writes
-
-`Dataset.write/3` is the foreground convenience. A finite row list is handled
-as one input, while any enumerable can yield row maps, row lists, column maps,
-or `Parquex.Batch` values.
-
-Writer bounds:
-
-| Option | Default | Meaning |
-| --- | ---: | --- |
-| `max_open_partitions` | 4 | Maximum active partition writers |
-| `max_rows_per_file` | 100,000 | Rotation target checked before each row |
-| `max_bytes_per_file` | 64 MiB | Estimated uncompressed rotation target |
-| `batch_rows` | 1,024 | Maximum buffered rows per active partition |
-
-Normal Parquet writer options such as `max_batch_rows`,
-`max_row_group_rows`, `data_page_size_limit`, `flush`, `sync`, and
-`statistics` are also accepted. Dataset compression comes from the descriptor.
-
-Disordered input is processed in input order. When the active registry is
-full, deterministic least-recently-used eviction flushes and publishes one
-part. A later row for that partition opens a new part. Rotation never reopens
-or changes a completed object.
+## Write rows
 
 ```elixir
-{:ok, writer} =
-  Parquex.Dataset.open_writer(dataset,
-    max_open_partitions: 2,
-    max_rows_per_file: 50_000
+{:ok, report} =
+  Parquex.Dataset.write(dataset, events,
+    max_open_partitions: 4,
+    max_rows_per_file: 100_000,
+    max_bytes_per_file: 64 * 1024 * 1024,
+    batch_rows: 1_024
   )
+```
 
-:ok = Parquex.Dataset.Writer.write(writer, rows_or_batch)
+The report contains total rows, total bytes, and metadata for every generated part. Part keys combine the partition path with a collision-resistant filename.
+
+Rows can arrive in any partition order. `max_open_partitions` bounds the number of active Parquet writers; the least recently used partition is completed when another partition needs room. Row and estimated-byte limits rotate a partition into another part.
+
+For explicit lifecycle control:
+
+```elixir
+{:ok, writer} = Parquex.Dataset.open_writer(dataset, max_open_partitions: 2)
+:ok = Parquex.Dataset.Writer.write(writer, first_rows)
+:ok = Parquex.Dataset.Writer.write(writer, next_batch)
 {:ok, report} = Parquex.Dataset.Writer.close(writer)
 ```
 
-The report contains every published key, canonical partition, row count,
-object size, and observed min/max event time. Closing publishes active parts;
-cancelling or owner exit aborts unpublished staging. A producer/storage failure
-preserves already published immutable parts and cleans active work.
+`Parquex.Dataset.Writer.write/2` accepts one `Parquex.Batch`, one row map, a row list, or a column map. `cancel/1` discards every active part.
 
-Peak live writer memory is bounded by input size, `batch_rows`, active
-partitions, Parquet encoder/page/row-group settings, and multipart bounds.
-`max_bytes_per_file` is an estimated uncompressed target, not an exact encoded
-file-size promise. One large cell still has to fit in one bounded batch.
+## Read a time range
 
-## Lazy exact range streams
-
-Every read range is half-open: `[from, until)`. Both endpoints are required.
+Dataset ranges are half-open: `from` is included and `until` is excluded.
 
 ```elixir
 {:ok, stream} =
   Parquex.Dataset.stream(dataset,
     from: ~U[2026-08-03 10:00:00Z],
     until: ~U[2026-08-03 13:00:00Z],
-    columns: [:space_id, :sequence],
-    where: {:gt, :sequence, 10_000},
-    batch_size: 1_024,
-    prefetch_depth: 1,
-    max_partitions: 10_000
+    columns: [:space_id, :sequence, :payload],
+    where: {:gt, :sequence, 100},
+    batch_size: 1_024
   )
 ```
 
-Opening performs calendar planning only. Each pull lists the next exact
-partition prefix, ignores non-`.parquet` objects, sorts part keys, and opens one
-file reader. Exact row filtering is always applied after partition pruning, so
-rows before `from` or at/after `until` are excluded even when they are in a
-boundary or misplaced late-data file.
+The stream lists only partition prefixes that overlap the range, opens one file at a time, and applies an exact row-level time check. Projection and the optional predicate use the same behavior as `Parquex.stream/3`.
 
-Projection fields are returned in dataset schema order. Timestamp and
-predicate columns are retained internally until filtering finishes. The
-optional comparison is `{operator, column, scalar}` with `:gt`, `:gte`, `:lt`,
-`:lte`, or `:eq`.
+`Parquex.Dataset.read/2` follows the same plan and collects all selected rows:
 
-`Dataset.read/2` materializes all selected rows and should be used only for a
-finite result. The streaming path has at most one active file and bounded batch,
-range, and prefetch memory. Traversal is deterministic by partition and key but
-does not globally sort rows by event time.
+```elixir
+{:ok, rows} =
+  Parquex.Dataset.read(dataset,
+    from: ~U[2026-08-03 10:00:00Z],
+    until: ~U[2026-08-03 11:00:00Z]
+  )
+```
 
-`Dataset.Stream.stats/1` reports only counts: planned/listed/skipped partitions,
-discovered/opened/skipped objects, emitted batches/rows, and peak active files.
-It never contains keys or storage configuration. Early halt or a consumer
-exception closes the current native reader.
+Traversal is deterministic by partition and part key. Applications can sort materialized rows when they require another ordering.
+

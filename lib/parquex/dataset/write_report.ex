@@ -1,5 +1,5 @@
 defmodule Parquex.Dataset.WriteReport do
-  @moduledoc "Summary of immutable parts published by one dataset writer."
+  @moduledoc "Summary of the parts written by one dataset writer."
 
   @enforce_keys [:parts, :rows, :bytes]
   defstruct [:parts, :rows, :bytes]

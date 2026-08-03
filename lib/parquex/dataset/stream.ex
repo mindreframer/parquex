@@ -1,5 +1,5 @@
 defmodule Parquex.Dataset.Stream do
-  @moduledoc "A pull-based, prefix-pruned stream across immutable dataset parts."
+  @moduledoc "A pull-based, prefix-pruned stream across dataset parts."
 
   alias Parquex.{Batch, Dataset, Error, Native, Schema, Store, TimePartition}
 

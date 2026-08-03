@@ -21,8 +21,6 @@ defmodule Parquex.Dataset.Writer do
     :max_batch_rows,
     :max_row_group_rows,
     :data_page_size_limit,
-    :flush,
-    :sync,
     :statistics
   ]
   @keys Keyword.keys(@defaults) ++ @writer_keys

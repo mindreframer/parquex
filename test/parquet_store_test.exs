@@ -61,6 +61,27 @@ defmodule Parquex.ParquetStoreTest do
     assert {:ok, ^schema} = Parquex.schema(store, "empty.parquet", [])
   end
 
+  test "explicit schema writes are unambiguous and storage policies are internal", %{
+    tmp_dir: tmp_dir
+  } do
+    {:ok, store} = Store.open(:local, root: tmp_dir)
+    schema = Schema.new!([{:id, :int64, false}, {:name, :string, true}])
+    rows = [%{"id" => 1, "name" => "one"}]
+
+    assert {:ok, _metadata} = Parquex.write(store, "explicit.parquet", schema, rows)
+    assert {:ok, ^rows} = Parquex.read(store, "explicit.parquet")
+
+    for options <- [[flush: :each_chunk], [sync: :all], [schema: schema]] do
+      assert {:error, %Error{category: :invalid_argument, operation: :parquet_writer_open}} =
+               Parquex.write(store, "invalid.parquet", rows, options)
+    end
+
+    assert {:error, %Error{category: :invalid_argument, operation: :parquet_writer_open}} =
+             Parquex.open_writer(store, "invalid.parquet", schema, flush: :before_publish)
+
+    refute File.exists?(Path.join(tmp_dir, "invalid.parquet"))
+  end
+
   test "inference rejects ambiguous and incompatible finite input", %{tmp_dir: tmp_dir} do
     {:ok, store} = Store.open(:local, root: tmp_dir)
 

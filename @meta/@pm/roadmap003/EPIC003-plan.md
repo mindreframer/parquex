@@ -2,11 +2,11 @@
 
 ## Progress
 
-- [ ] Phase 3.1: Simplify file function heads and writer settings.
-- [ ] Phase 3.2: Simplify raw object writer lifecycle.
-- [ ] Phase 3.3: Align datasets with generated-key direct publication.
-- [ ] Phase 3.4: Add focused ergonomic and boundedness tests.
-- [ ] Phase 3.5: Pass QA, review and commit.
+- [x] Phase 3.1: Simplify file function heads and writer settings.
+- [x] Phase 3.2: Simplify raw object writer lifecycle.
+- [x] Phase 3.3: Align datasets with generated-key direct publication.
+- [x] Phase 3.4: Add focused ergonomic and boundedness tests.
+- [x] Phase 3.5: Pass QA, review and commit.
 
 ## Implementation Steps
 
@@ -21,12 +21,12 @@
 
 ## Quality Gate
 
-- [ ] Common function forms are unique and documented.
-- [ ] Removed options fail clearly.
-- [ ] Dataset writes and reads remain bounded.
-- [ ] Generated dataset keys remain collision-resistant.
-- [ ] Scheduler and resource regression tests pass.
-- [ ] `bin/qa_check.sh` passes.
+- [x] Common function forms are unique and documented.
+- [x] Removed options fail clearly.
+- [x] Dataset writes and reads remain bounded.
+- [x] Generated dataset keys remain collision-resistant.
+- [x] Scheduler and resource regression tests pass.
+- [x] `bin/qa_check.sh` passes.
 
 ## Commit Rule
 

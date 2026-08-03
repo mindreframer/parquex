@@ -224,34 +224,19 @@ defmodule Parquex.Store do
   def delete(_store, _key), do: invalid(:store_delete, "expected an open store")
 
   @doc "Opens a writer for a relative key."
-  @spec open_writer(t(), String.t(), keyword()) :: {:ok, Writer.t()} | {:error, Error.t()}
-  def open_writer(store, key, options \\ [])
-
-  def open_writer(%__MODULE__{} = store, key, options) when is_list(options) do
-    with :ok <- validate_writer_options(options),
-         {:ok, key} <- normalize_key(key),
-         {:ok, flush} <-
-           writer_policy(
-             Keyword.get(options, :flush, :before_publish),
-             [:none, :each_chunk, :before_publish],
-             :flush
-           ),
-         {:ok, sync} <-
-           writer_policy(Keyword.get(options, :sync, :none), [:none, :data, :all], :sync),
+  @spec open_writer(t(), String.t()) :: {:ok, Writer.t()} | {:error, Error.t()}
+  def open_writer(%__MODULE__{} = store, key) do
+    with {:ok, key} <- normalize_key(key),
          {:ok, resource} <-
            native_result(
-             Native.store_writer_open(store.resource, key, flush, sync, self()),
+             Native.store_writer_open(store.resource, key, :before_publish, :none, self()),
              :store_writer_open
            ) do
       {:ok, %Writer{resource: resource, store: store, key: key}}
     end
   end
 
-  def open_writer(%__MODULE__{}, _key, _options),
-    do: invalid(:store_writer_open, "writer options must be a keyword list")
-
-  def open_writer(_store, _key, _options),
-    do: invalid(:store_writer_open, "expected an open store")
+  def open_writer(_store, _key), do: invalid(:store_writer_open, "expected an open store")
 
   @doc "Writes one iodata chunk to an open store writer."
   @spec write(Writer.t(), iodata()) :: :ok | {:error, Error.t()}
@@ -290,10 +275,9 @@ defmodule Parquex.Store do
   def cancel(_writer), do: invalid(:store_writer_abort, "expected an open writer")
 
   @doc "Consumes bounded chunks and writes one object."
-  @spec put(t(), String.t(), Enumerable.t(), keyword()) ::
-          {:ok, Metadata.t()} | {:error, Error.t()}
-  def put(%__MODULE__{} = store, key, chunks, options \\ []) do
-    with {:ok, writer} <- open_writer(store, key, options) do
+  @spec put(t(), String.t(), Enumerable.t()) :: {:ok, Metadata.t()} | {:error, Error.t()}
+  def put(%__MODULE__{} = store, key, chunks) do
+    with {:ok, writer} <- open_writer(store, key) do
       try do
         with :ok <- write_all(writer, chunks), do: publish(writer)
       after
@@ -582,25 +566,6 @@ defmodule Parquex.Store do
 
     with {:ok, chunk} <- read_range(store, key, offset, length) do
       read_chunks(store, key, size, offset + byte_size(chunk), [chunk | chunks])
-    end
-  end
-
-  defp writer_policy(value, allowed, name) do
-    if value in allowed,
-      do: {:ok, value},
-      else: invalid(:store_writer_open, "invalid #{name} policy")
-  end
-
-  defp validate_writer_options(options) do
-    cond do
-      not Keyword.keyword?(options) ->
-        invalid(:store_writer_open, "writer options must be a keyword list")
-
-      Keyword.keys(options) -- [:flush, :sync] != [] ->
-        invalid(:store_writer_open, "unknown writer option")
-
-      true ->
-        :ok
     end
   end
 

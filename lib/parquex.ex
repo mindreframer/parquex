@@ -21,9 +21,19 @@ defmodule Parquex do
   end
 
   @doc "Writes finite rows or columns to one Parquet file, inferring its schema."
+  @spec write(Store.t(), String.t(), term()) ::
+          {:ok, Store.Metadata.t()} | {:error, Error.t()}
+  def write(%Store{} = store, key, input), do: write(store, key, input, [])
+
+  @doc "Writes finite rows or columns with an explicit schema to one Parquet file."
+  @spec write(Store.t(), String.t(), Schema.t(), term()) ::
+          {:ok, Store.Metadata.t()} | {:error, Error.t()}
+  def write(%Store{} = store, key, %Schema{} = schema, input),
+    do: write(store, key, schema, input, [])
+
   @spec write(Store.t(), String.t(), term(), keyword()) ::
           {:ok, Store.Metadata.t()} | {:error, Error.t()}
-  def write(%Store{} = store, key, input, options \\ []) do
+  def write(%Store{} = store, key, input, options) do
     with {:ok, schema, batches, writer_options} <- finite_batches(input, options) do
       Telemetry.span(:write, store, fn ->
         write_file(store, key, schema, batches, writer_options)
@@ -31,7 +41,6 @@ defmodule Parquex do
     end
   end
 
-  @doc "Writes finite rows or columns with an explicit schema to one Parquet file."
   @spec write(Store.t(), String.t(), Schema.t(), term(), keyword()) ::
           {:ok, Store.Metadata.t()} | {:error, Error.t()}
   def write(%Store{} = store, key, %Schema{} = schema, input, options) do

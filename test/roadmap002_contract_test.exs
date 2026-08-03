@@ -48,6 +48,13 @@ defmodule Parquex.Roadmap002ContractTest do
 
       assert {:ok, "events/part-1.parquet"} = Store.normalize_key("events/part-1.parquet")
     end
+
+    test "keeps raw chunk writers free of storage policy options" do
+      assert function_exported?(Store, :open_writer, 2)
+      refute function_exported?(Store, :open_writer, 3)
+      assert function_exported?(Store, :put, 3)
+      refute function_exported?(Store, :put, 4)
+    end
   end
 
   describe "Schema" do
@@ -147,6 +154,20 @@ defmodule Parquex.Roadmap002ContractTest do
                Dataset.new(store, "events", base ++ [unknown: true])
 
       assert_raise ArgumentError, fn -> Dataset.new!(store, "", base) end
+    end
+
+    test "does not expose storage flush or sync policies", %{store: store, schema: schema} do
+      dataset =
+        Dataset.new!(store, "events",
+          schema: schema,
+          partition_by: {:time, :timestamp, :hour}
+        )
+
+      assert {:error, %Error{operation: :dataset_writer}} =
+               Dataset.open_writer(dataset, flush: :each_chunk)
+
+      assert {:error, %Error{operation: :dataset_writer}} =
+               Dataset.open_writer(dataset, sync: :all)
     end
   end
 end

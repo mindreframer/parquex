@@ -2,10 +2,10 @@ defmodule Parquex.Dataset do
   @moduledoc """
   A validated Parquet dataset beneath one store prefix.
 
-  A dataset combines a reusable `Parquex.Store`, an immutable object-key
-  prefix, an explicit schema and a UTC event-time partition specification.
+  A dataset combines a reusable `Parquex.Store`, an object-key prefix, an
+  explicit schema and a UTC event-time partition specification.
   Dataset writers route each row by its event timestamp into canonical UTC
-  paths and publish immutable Parquet parts. Dataset streams lazily discover
+  paths and write uniquely named Parquet parts. Dataset streams lazily discover
   only overlapping partitions and apply exact half-open time filtering.
 
   ## Examples
@@ -103,7 +103,7 @@ defmodule Parquex.Dataset do
   def open_writer(%__MODULE__{} = dataset, options \\ []),
     do: Writer.open(dataset, options)
 
-  @doc "Writes finite rows or a finite/continuous enumerable into immutable partition parts."
+  @doc "Writes finite rows or a finite/continuous enumerable into partition parts."
   @spec write(t(), term(), keyword()) :: {:ok, WriteReport.t()} | {:error, Error.t()}
   def write(%__MODULE__{} = dataset, input, options \\ []) do
     with {:ok, writer} <- open_writer(dataset, options) do

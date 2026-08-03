@@ -19,8 +19,6 @@ defmodule Parquex.Writer do
     max_batch_rows: 65_536,
     max_row_group_rows: 1_048_576,
     data_page_size_limit: 1_048_576,
-    flush: :before_publish,
-    sync: :none,
     statistics: :chunk
   ]
   @keys Keyword.keys(@defaults)
@@ -119,14 +117,10 @@ defmodule Parquex.Writer do
   defp settings(options) do
     options = Keyword.merge(@defaults, options)
     compression = options[:compression]
-    flush = options[:flush]
-    sync = options[:sync]
     statistics = options[:statistics]
 
     cond do
       compression not in @compressions -> invalid("unsupported compression")
-      flush not in [:none, :each_chunk, :before_publish] -> invalid("invalid flush policy")
-      sync not in [:none, :data, :all] -> invalid("invalid sync policy")
       statistics not in [:chunk, :none] -> invalid("invalid statistics policy")
       true -> integer_settings(options)
     end
@@ -147,7 +141,7 @@ defmodule Parquex.Writer do
          keys,
          &(is_integer(options[&1]) and options[&1] > 0 and options[&1] <= @max_native_bound)
        ) do
-      {:ok, Map.new(options)}
+      {:ok, options |> Map.new() |> Map.put(:flush, :before_publish) |> Map.put(:sync, :none)}
     else
       invalid("writer bounds must be positive integers")
     end

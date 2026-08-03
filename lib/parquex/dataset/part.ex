@@ -1,5 +1,5 @@
 defmodule Parquex.Dataset.Part do
-  @moduledoc "A successfully published immutable dataset part."
+  @moduledoc "One successfully written dataset part."
 
   @enforce_keys [:key, :partition, :rows, :size, :min_timestamp, :max_timestamp]
   defstruct [:key, :partition, :rows, :size, :min_timestamp, :max_timestamp]

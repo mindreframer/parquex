@@ -1,6 +1,6 @@
 # ROADMAP001 — Parquex: Streaming Parquet over Local and S3 Object Storage
 
-- **Status:** Proposed
+- **Status:** Completed for `0.1.0`; superseded by `ROADMAP002`
 - **Scope:** Initial implementation
 - **Primary interface:** Elixir
 - **Native implementation:** Rust via Rustler

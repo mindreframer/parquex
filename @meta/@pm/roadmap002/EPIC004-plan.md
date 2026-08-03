@@ -2,12 +2,12 @@
 
 ## Progress
 
-- [ ] Phase 4.1: Define validated time partition types and units.
-- [ ] Phase 4.2: Implement Rust timestamp-to-partition calculation.
-- [ ] Phase 4.3: Implement canonical formatting and parsing.
-- [ ] Phase 4.4: Implement half-open range planning.
-- [ ] Phase 4.5: Add boundary/property/parity tests.
-- [ ] Phase 4.6: Pass the epic gate and commit.
+- [x] Phase 4.1: Define validated time partition types and units.
+- [x] Phase 4.2: Implement Rust timestamp-to-partition calculation.
+- [x] Phase 4.3: Implement canonical formatting and parsing.
+- [x] Phase 4.4: Implement half-open range planning.
+- [x] Phase 4.5: Add boundary/property/parity tests.
+- [x] Phase 4.6: Pass the epic gate and commit.
 
 ## Implementation Steps
 
@@ -21,12 +21,12 @@
 
 ## Quality Gate
 
-- [ ] All granularities format/parse round-trip.
-- [ ] Calendar, leap and ISO-week transitions are correct.
-- [ ] Range planning selects exactly overlapping partitions.
-- [ ] Invalid/excessive plans return stable errors.
-- [ ] Native code has no panic path for arbitrary input.
-- [ ] `bin/qa_check.sh` passes.
+- [x] All granularities format/parse round-trip.
+- [x] Calendar, leap and ISO-week transitions are correct.
+- [x] Range planning selects exactly overlapping partitions.
+- [x] Invalid/excessive plans return stable errors.
+- [x] Native code has no panic path for arbitrary input.
+- [x] `bin/qa_check.sh` passes.
 
 ## Commit Rule
 

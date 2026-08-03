@@ -10,6 +10,7 @@ mod object;
 mod reader;
 mod s3;
 mod store;
+mod time_partition;
 mod writer;
 
 use error::NativeFailure;
@@ -81,6 +82,12 @@ pub(crate) mod atoms {
         millisecond,
         microsecond,
         nanosecond,
+        minute,
+        hour,
+        day,
+        week,
+        month,
+        time_partition,
         nil_atom = "nil",
         uncompressed,
         snappy,
@@ -160,6 +167,7 @@ pub(crate) enum Operation {
     StoreWriterWrite,
     StoreWriterPublish,
     StoreWriterAbort,
+    TimePartition,
 }
 
 impl Operation {
@@ -203,6 +211,7 @@ impl Operation {
             Self::StoreWriterWrite => atoms::store_writer_write(),
             Self::StoreWriterPublish => atoms::store_writer_publish(),
             Self::StoreWriterAbort => atoms::store_writer_abort(),
+            Self::TimePartition => atoms::time_partition(),
         }
     }
 }
@@ -519,6 +528,39 @@ fn store_writer_abort(env: Env<'_>, writer: ResourceArc<StoreWriterResource>) ->
         } else {
             atoms::closed()
         })
+    })
+}
+
+#[rustler::nif]
+fn time_partition_for(
+    env: Env<'_>,
+    timestamp: i64,
+    unit: rustler::Atom,
+    granularity: rustler::Atom,
+) -> Term<'_> {
+    encode_guarded(env, Operation::TimePartition, || {
+        time_partition::partition_for(timestamp, unit, granularity)
+    })
+}
+
+#[rustler::nif]
+fn time_partition_parse(env: Env<'_>, path: String, granularity: rustler::Atom) -> Term<'_> {
+    encode_guarded(env, Operation::TimePartition, || {
+        time_partition::parse(&path, granularity)
+    })
+}
+
+#[rustler::nif(schedule = "DirtyCpu")]
+fn time_partition_plan(
+    env: Env<'_>,
+    from: i64,
+    until: i64,
+    unit: rustler::Atom,
+    granularity: rustler::Atom,
+    limit: usize,
+) -> Term<'_> {
+    encode_guarded(env, Operation::TimePartition, || {
+        time_partition::plan(from, until, unit, granularity, limit)
     })
 }
 

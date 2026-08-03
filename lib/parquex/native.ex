@@ -61,6 +61,14 @@ defmodule Parquex.Native do
   def store_writer_publish(_writer), do: :erlang.nif_error(:nif_not_loaded)
   def store_writer_abort(_writer), do: :erlang.nif_error(:nif_not_loaded)
 
+  def time_partition_for(_timestamp, _unit, _granularity),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def time_partition_parse(_path, _granularity), do: :erlang.nif_error(:nif_not_loaded)
+
+  def time_partition_plan(_from, _until, _unit, _granularity, _limit),
+    do: :erlang.nif_error(:nif_not_loaded)
+
   def local_head(_path, _allowed_root), do: :erlang.nif_error(:nif_not_loaded)
 
   def local_read_range(_path, _allowed_root, _offset, _length),

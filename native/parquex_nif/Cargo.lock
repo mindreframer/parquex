@@ -1228,6 +1228,7 @@ dependencies = [
  "arrow-schema",
  "arrow-select",
  "bytes",
+ "chrono",
  "futures-util",
  "object_store",
  "parquet",

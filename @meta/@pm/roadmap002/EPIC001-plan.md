@@ -2,12 +2,12 @@
 
 ## Progress
 
-- [ ] Phase 1.1: Inventory and classify the `0.1.x` public surface.
-- [ ] Phase 1.2: Add Store and Dataset descriptors and validation.
-- [ ] Phase 1.3: Define corrected object and Parquet signatures.
-- [ ] Phase 1.4: Document compatibility, ownership and memory behavior.
-- [ ] Phase 1.5: Add executable contract tests.
-- [ ] Phase 1.6: Pass the epic gate and commit.
+- [x] Phase 1.1: Inventory and classify the `0.1.x` public surface.
+- [x] Phase 1.2: Add Store and Dataset descriptors and validation.
+- [x] Phase 1.3: Define corrected object and Parquet signatures.
+- [x] Phase 1.4: Document compatibility, ownership and memory behavior.
+- [x] Phase 1.5: Add executable contract tests.
+- [x] Phase 1.6: Pass the epic gate and commit.
 
 ## Implementation Steps
 
@@ -21,12 +21,12 @@
 
 ## Quality Gate
 
-- [ ] Corrected examples avoid direct Location construction.
-- [ ] Finite and streaming behavior is unambiguous.
-- [ ] Inspection is redacted and keys/prefixes normalize safely.
-- [ ] Existing behavior remains green.
-- [ ] `bin/qa_check.sh` passes.
-- [ ] Diff contains only EPIC001 work plus plan completion updates.
+- [x] Corrected examples avoid direct Location construction.
+- [x] Finite and streaming behavior is unambiguous.
+- [x] Inspection is redacted and keys/prefixes normalize safely.
+- [x] Existing behavior remains green.
+- [x] `bin/qa_check.sh` passes.
+- [x] Diff contains only EPIC001 work plus plan completion updates.
 
 ## Commit Rule
 

@@ -37,6 +37,50 @@ defmodule Parquex.Schema do
 
   @type t :: %__MODULE__{fields: [Field.t()]}
 
+  @doc """
+  Creates an ordered schema from concise Elixir field descriptors.
+
+  A two-element descriptor defaults to a nullable field. Use a three-element
+  tuple or field map to set nullability explicitly.
+
+  ## Examples
+
+      iex> {:ok, schema} =
+      ...>   Parquex.Schema.new([
+      ...>     {:id, :int64, false},
+      ...>     {:name, :string, true},
+      ...>     {:occurred_at, {:timestamp, :millisecond}, false}
+      ...>   ])
+      iex> Enum.map(schema.fields, &{&1.name, &1.type, &1.nullable})
+      [
+        {"id", {:integer, 64, true}, false},
+        {"name", :utf8, true},
+        {"occurred_at", {:timestamp, :millisecond, "UTC"}, false}
+      ]
+
+  Supported aliases include `:string`, signed and unsigned integer widths,
+  `:float32`, `:float64`, `:date`, and two-element timestamp descriptors. The
+  stable low-level descriptors in `t_type/0` remain accepted.
+  """
+  @spec new(keyword() | [tuple() | map()]) :: {:ok, t()} | {:error, Parquex.Error.t()}
+  def new(fields) when is_list(fields) do
+    with {:ok, fields} <- normalize_public_fields(fields),
+         :ok <- validate_unique_names(fields) do
+      {:ok, %__MODULE__{fields: fields}}
+    end
+  end
+
+  def new(_fields), do: public_schema_error("schema fields must be an ordered list")
+
+  @doc "Creates a schema and raises `ArgumentError` when a descriptor is invalid."
+  @spec new!(keyword() | [tuple() | map()]) :: t()
+  def new!(fields) do
+    case new(fields) do
+      {:ok, schema} -> schema
+      {:error, %Parquex.Error{} = error} -> raise ArgumentError, error.message
+    end
+  end
+
   @doc "Returns fields in file order, filtered by projection when configured."
   @spec fields(t()) :: [Field.t()]
   def fields(%__MODULE__{fields: fields}), do: fields
@@ -49,6 +93,9 @@ defmodule Parquex.Schema do
       field -> {:ok, field}
     end
   end
+
+  def field(%__MODULE__{} = schema, name) when is_atom(name),
+    do: field(schema, Atom.to_string(name))
 
   @doc false
   @spec from_native([map()]) :: {:ok, t()} | {:error, Parquex.Error.t()}
@@ -126,6 +173,103 @@ defmodule Parquex.Schema do
       {:ok, decoded} -> {:ok, Enum.reverse(decoded)}
       {:error, _error} = error -> error
     end
+  end
+
+  defp normalize_public_fields(fields) do
+    fields
+    |> Enum.reduce_while({:ok, []}, fn descriptor, {:ok, normalized} ->
+      case normalize_public_field(descriptor) do
+        {:ok, field} -> {:cont, {:ok, [field | normalized]}}
+        {:error, _error} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, normalized} -> {:ok, Enum.reverse(normalized)}
+      {:error, _error} = error -> error
+    end
+  end
+
+  defp normalize_public_field({name, type}), do: normalize_public_field({name, type, true})
+
+  defp normalize_public_field({name, type, nullable}) when is_boolean(nullable) do
+    with {:ok, name} <- normalize_public_name(name),
+         {:ok, type} <- normalize_public_type(type) do
+      {:ok, %Field{name: name, type: type, nullable: nullable}}
+    end
+  end
+
+  defp normalize_public_field(%{name: name, type: type} = descriptor) do
+    normalize_public_field({name, type, Map.get(descriptor, :nullable, true)})
+  end
+
+  defp normalize_public_field(_descriptor),
+    do:
+      public_schema_error("each schema field must contain a name, type, and optional nullability")
+
+  defp normalize_public_name(name) when is_atom(name),
+    do: normalize_public_name(Atom.to_string(name))
+
+  defp normalize_public_name(name) when is_binary(name) and name != "", do: {:ok, name}
+
+  defp normalize_public_name(_name),
+    do: public_schema_error("schema field names must be non-empty")
+
+  defp normalize_public_type(:string), do: {:ok, :utf8}
+  defp normalize_public_type(:int8), do: {:ok, {:integer, 8, true}}
+  defp normalize_public_type(:int16), do: {:ok, {:integer, 16, true}}
+  defp normalize_public_type(:int32), do: {:ok, {:integer, 32, true}}
+  defp normalize_public_type(:int64), do: {:ok, {:integer, 64, true}}
+  defp normalize_public_type(:uint8), do: {:ok, {:integer, 8, false}}
+  defp normalize_public_type(:uint16), do: {:ok, {:integer, 16, false}}
+  defp normalize_public_type(:uint32), do: {:ok, {:integer, 32, false}}
+  defp normalize_public_type(:uint64), do: {:ok, {:integer, 64, false}}
+  defp normalize_public_type(:float32), do: {:ok, {:float, 32}}
+  defp normalize_public_type(:float64), do: {:ok, {:float, 64}}
+  defp normalize_public_type(:date), do: {:ok, :date32}
+
+  defp normalize_public_type({:timestamp, unit})
+       when unit in [:second, :millisecond, :microsecond, :nanosecond],
+       do: {:ok, {:timestamp, unit, "UTC"}}
+
+  defp normalize_public_type(type)
+       when type in [:boolean, :utf8, :binary, :date32, :date64, :null],
+       do: {:ok, type}
+
+  defp normalize_public_type({:integer, bits, signed} = type)
+       when bits in [8, 16, 32, 64] and is_boolean(signed),
+       do: {:ok, type}
+
+  defp normalize_public_type({:float, bits} = type) when bits in [32, 64], do: {:ok, type}
+
+  defp normalize_public_type({:timestamp, unit, timezone} = type)
+       when unit in [:second, :millisecond, :microsecond, :nanosecond] and
+              (is_binary(timezone) or is_nil(timezone)),
+       do: {:ok, type}
+
+  defp normalize_public_type(type) do
+    try do
+      _encoded = encode_type(type)
+      {:ok, type}
+    rescue
+      FunctionClauseError -> public_schema_error("schema field type is unsupported")
+    end
+  end
+
+  defp validate_unique_names(fields) do
+    names = Enum.map(fields, & &1.name)
+
+    if length(names) == MapSet.size(MapSet.new(names)),
+      do: :ok,
+      else: public_schema_error("schema field names must be unique")
+  end
+
+  defp public_schema_error(message) do
+    {:error,
+     %Parquex.Error{
+       category: :invalid_argument,
+       operation: :schema,
+       message: message
+     }}
   end
 
   defp decode_field(%{name: name, nullable: nullable, data_type: data_type})

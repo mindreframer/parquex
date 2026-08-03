@@ -2,14 +2,14 @@ defmodule Parquex.Options do
   @moduledoc """
   Explicit bounds and policies for Parquex operations.
 
-  Locations validate `:allowed_root`, `:max_range_bytes`, and secret option
-  marking. Parquet scans validate `:batch_size`, `:prefetch_depth`, `:columns`,
-  and `:where`; mixed scans also validate `:source_concurrency`. Parquet writes
-  validate `:compression`, `:max_batch_rows`, `:max_row_group_rows`,
-  `:data_page_size_limit`, `:statistics`, `:flush`, and `:sync`. S3 locations
-  carry their own range, request-concurrency, multipart, timeout, retry, and
-  credential bounds. Defaults remain per operation and never select a
-  process-global storage backend.
+  Stores own local-root or S3 client configuration once. Datasets own their
+  schema, UTC time-partition contract and Parquet defaults. Individual bounded
+  readers and writers retain explicit batch, range, row-group, multipart,
+  prefetch and open-partition limits.
+
+  The `0.1.x` location compatibility API continues to validate
+  `:allowed_root`, `:max_range_bytes`, S3 credentials, request bounds and the
+  established scan/write options. No option selects a process-global backend.
   """
 
   @type read_option :: {atom(), term()}

@@ -9,6 +9,7 @@ preserve:
 - [ADR 004: Immutable publication](004-immutable-publication.md)
 - [ADR 005: Focused scope](005-focused-scope.md)
 - [ADR 006: Safe bounded-cardinality telemetry](006-safe-telemetry.md)
+- [ADR 007: Store- and dataset-centric public contract](007-store-dataset-contract.md)
 - [Native runtime and lifecycle rules](native-runtime.md)
 - [Object-access and local-publication contract](object-access.md)
 - [Streaming Parquet read contract](../parquet-reads.md)

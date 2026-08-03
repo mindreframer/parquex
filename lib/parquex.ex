@@ -1,16 +1,22 @@
 defmodule Parquex do
   @moduledoc """
-  Streams bounded columnar batches to and from immutable Parquet objects.
+  Reads and writes immutable Parquet objects and time-partitioned datasets.
 
-  Streaming is the primary Parquex interface. Parquet scans produce lazy,
-  projected `Parquex.Batch` values through the backend-neutral object layer.
-  `Parquex.Object` also provides bounded local/S3 ranges and staged, create-only
-  publication. Parquet writes consume compatible bounded batches and publish
-  complete new local or S3 objects.
+  The `0.2.x` public model starts with a reusable `Parquex.Store`, addresses
+  objects with relative keys, and describes partitioned collections with
+  `Parquex.Dataset`. Streaming remains the safe interface for large data;
+  finite read/write helpers explicitly materialize their input or output.
 
-  The diagnostic functions in this module verify that the packaged native
-  boundary can load and that native failures are translated into stable Elixir
-  errors.
+  `Parquex.Location`, `Parquex.Object`, `scan/2`, `write/4`, and `append/4`
+  remain available as the `0.1.x` compatibility surface while Roadmap 002 moves
+  their proven native behavior behind the store/key API. Completed Parquet
+  objects remain immutable: dataset writes create new parts rather than
+  appending bytes to an existing file.
+
+  SQL, dataframe transformations, event sequencing, snapshot orchestration and
+  compaction are outside this package. The diagnostic functions in this module
+  verify that the packaged native boundary can load and that native failures
+  are translated into stable Elixir errors.
   """
 
   @doc """

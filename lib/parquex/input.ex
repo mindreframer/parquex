@@ -3,6 +3,10 @@ defmodule Parquex.Input do
 
   alias Parquex.{Batch, Error, Schema}
 
+  @doc false
+  @spec finite_rows(term()) :: {:ok, [map()]} | {:error, Error.t()}
+  def finite_rows(input), do: rows(input)
+
   @spec infer_and_batches(term(), pos_integer()) ::
           {:ok, Schema.t(), [Batch.t()]} | {:error, Error.t()}
   def infer_and_batches(input, batch_rows) do
@@ -68,7 +72,7 @@ defmodule Parquex.Input do
       else: invalid("finite input must be a list of row maps or a column map")
   end
 
-  defp rows(input) when is_map(input) do
+  defp rows(input) when is_map(input) and not is_struct(input) do
     if map_size(input) > 0 and Enum.all?(input, fn {_key, values} -> is_list(values) end) do
       columns_to_rows(input)
     else

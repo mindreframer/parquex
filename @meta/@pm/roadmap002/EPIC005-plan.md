@@ -2,12 +2,12 @@
 
 ## Progress
 
-- [ ] Phase 5.1: Implement finite dataset write orchestration.
-- [ ] Phase 5.2: Implement explicit dataset writer resources.
-- [ ] Phase 5.3: Add bounded partition routing and eviction.
-- [ ] Phase 5.4: Add file rotation, naming and reports.
-- [ ] Phase 5.5: Harden late/disordered/failure behavior.
-- [ ] Phase 5.6: Pass the epic gate and commit.
+- [x] Phase 5.1: Implement finite dataset write orchestration.
+- [x] Phase 5.2: Implement explicit dataset writer resources.
+- [x] Phase 5.3: Add bounded partition routing and eviction.
+- [x] Phase 5.4: Add file rotation, naming and reports.
+- [x] Phase 5.5: Harden late/disordered/failure behavior.
+- [x] Phase 5.6: Pass the epic gate and commit.
 
 ## Implementation Steps
 
@@ -22,13 +22,13 @@
 
 ## Quality Gate
 
-- [ ] Every granularity produces independently readable canonical parts.
-- [ ] Writer resources never exceed configured open partitions.
-- [ ] Rotation has no row loss/duplication.
-- [ ] Late data creates new immutable parts safely.
-- [ ] Failures clean active local/S3 staging and report published parts.
-- [ ] Memory is bounded independently of total input.
-- [ ] `bin/qa_check.sh` passes.
+- [x] Every granularity produces independently readable canonical parts.
+- [x] Writer resources never exceed configured open partitions.
+- [x] Rotation has no row loss/duplication.
+- [x] Late data creates new immutable parts safely.
+- [x] Failures clean active local/S3 staging and report published parts.
+- [x] Memory is bounded independently of total input.
+- [x] `bin/qa_check.sh` passes.
 
 ## Commit Rule
 

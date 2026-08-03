@@ -4,8 +4,9 @@ defmodule Parquex.Dataset do
 
   A dataset combines a reusable `Parquex.Store`, an immutable object-key
   prefix, an explicit schema and a UTC event-time partition specification.
-  Dataset writing and time-range reading are implemented by Roadmap 002 Epics
-  5 and 6; this module establishes their stable configuration contract.
+  Dataset writers route each row by its event timestamp into canonical UTC
+  paths and publish immutable Parquet parts. Time-range reading is added by
+  Roadmap 002 Epic 6.
 
   ## Examples
 
@@ -24,6 +25,7 @@ defmodule Parquex.Dataset do
   """
 
   alias Parquex.{Error, Schema, Store, TimePartition}
+  alias Parquex.Dataset.{WriteReport, Writer}
 
   @allowed_options [:schema, :partition_by, :timestamp_unit, :compression]
   @compressions [:zstd, :snappy, :uncompressed]
@@ -95,6 +97,47 @@ defmodule Parquex.Dataset do
   @doc "Returns the default Parquet compression."
   @spec compression(t()) :: :zstd | :snappy | :uncompressed
   def compression(%__MODULE__{compression: compression}), do: compression
+
+  @doc "Opens an owner-bound writer with a bounded active-partition registry."
+  @spec open_writer(t(), keyword()) :: {:ok, Writer.t()} | {:error, Error.t()}
+  def open_writer(%__MODULE__{} = dataset, options \\ []),
+    do: Writer.open(dataset, options)
+
+  @doc "Writes finite rows or a finite/continuous enumerable into immutable partition parts."
+  @spec write(t(), term(), keyword()) :: {:ok, WriteReport.t()} | {:error, Error.t()}
+  def write(%__MODULE__{} = dataset, input, options \\ []) do
+    with {:ok, writer} <- open_writer(dataset, options) do
+      try do
+        with :ok <- feed(writer, input), do: Writer.close(writer)
+      after
+        Writer.cancel(writer)
+      end
+    end
+  end
+
+  defp feed(writer, %Parquex.Batch{} = batch), do: Writer.write(writer, batch)
+
+  defp feed(writer, input) when is_map(input) and not is_struct(input),
+    do: Writer.write(writer, input)
+
+  defp feed(writer, input) when is_list(input) do
+    if Enum.all?(input, &match?(%Parquex.Batch{}, &1)),
+      do: feed_enumerable(writer, input),
+      else: Writer.write(writer, input)
+  end
+
+  defp feed(writer, input), do: feed_enumerable(writer, input)
+
+  defp feed_enumerable(writer, input) do
+    Enum.reduce_while(input, :ok, fn item, :ok ->
+      case Writer.write(writer, item) do
+        :ok -> {:cont, :ok}
+        {:error, _error} = error -> {:halt, error}
+      end
+    end)
+  rescue
+    Protocol.UndefinedError -> invalid("dataset input must be finite rows or enumerable batches")
+  end
 
   defp validate_keyword(options) do
     if Keyword.keyword?(options), do: :ok, else: invalid("dataset options must be a keyword list")

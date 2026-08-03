@@ -50,6 +50,16 @@ defmodule Parquex.TimePartition do
 
   def for_timestamp(_spec, _timestamp), do: invalid("expected a time partition specification")
 
+  @doc false
+  @spec normalize_timestamp(t(), DateTime.t() | NaiveDateTime.t() | integer()) ::
+          {:ok, integer(), DateTime.t()} | {:error, Error.t()}
+  def normalize_timestamp(%__MODULE__{} = spec, timestamp) do
+    with {:ok, encoded} <- encode_timestamp(timestamp, spec.timestamp_unit),
+         {:ok, datetime} <- encoded_datetime(encoded, spec.timestamp_unit) do
+      {:ok, encoded, datetime}
+    end
+  end
+
   @doc "Returns only the canonical relative partition path for one instant."
   @spec path(t(), DateTime.t() | NaiveDateTime.t() | integer()) ::
           {:ok, String.t()} | {:error, Error.t()}
@@ -186,6 +196,13 @@ defmodule Parquex.TimePartition do
     case DateTime.from_unix(seconds * 1_000_000_000 + nanosecond, :nanosecond) do
       {:ok, datetime} -> {:ok, datetime}
       {:error, _reason} -> invalid("native partition timestamp is invalid")
+    end
+  end
+
+  defp encoded_datetime(value, unit) do
+    case DateTime.from_unix(value, unit) do
+      {:ok, datetime} -> {:ok, datetime}
+      {:error, _reason} -> invalid("timestamp is outside the supported range")
     end
   end
 

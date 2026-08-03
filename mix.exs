@@ -11,6 +11,7 @@ defmodule Parquex.MixProject do
       version: @version,
       elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
+      prune_code_paths: Mix.env() != :dev,
       start_permanent: Mix.env() == :prod,
       description:
         "Fast, bounded, and ergonomic Parquet streaming for Elixir on local and S3-compatible object storage, powered by Rust",

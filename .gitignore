@@ -19,6 +19,9 @@
 # Temporary files, for example, from tests.
 /tmp/
 
+# Local model transcripts may contain machine-specific paths or credentials.
+/@meta/@llm/
+
 # If the VM crashes, it generates a dump, let's ignore it too.
 erl_crash.dump
 

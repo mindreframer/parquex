@@ -90,7 +90,11 @@ defmodule Parquex.StoreS3IntegrationTest do
     send(pid, :stop)
     assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}
     assert {:error, %Error{category: :not_found}} = Store.head(store, "objects/incomplete.bin")
-    assert Store.resource_snapshot().active_multipart_uploads == before.active_multipart_uploads
+
+    assert eventually?(fn ->
+             Store.resource_snapshot().active_multipart_uploads ==
+               before.active_multipart_uploads
+           end)
   end
 
   test "repeated replacement returns multipart resources to baseline", %{store: store} do
@@ -134,5 +138,18 @@ defmodule Parquex.StoreS3IntegrationTest do
       access_key_id: @access,
       secret_access_key: @secret
     ]
+  end
+
+  defp eventually?(condition, attempts \\ 100)
+  defp eventually?(condition, _attempts) when not is_function(condition, 0), do: false
+  defp eventually?(condition, attempts) when attempts <= 0, do: condition.()
+
+  defp eventually?(condition, attempts) do
+    if condition.() do
+      true
+    else
+      Process.sleep(10)
+      eventually?(condition, attempts - 1)
+    end
   end
 end

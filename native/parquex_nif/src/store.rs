@@ -128,8 +128,7 @@ impl StoreResource {
         validate_key(prefix, true)?;
         let cancellation = CancellationToken::default();
         match &self.backend {
-            StoreBackend::Local { root } => LocalStore
-                .list(&local_location(root, ""), prefix, &cancellation)?
+            StoreBackend::Local { root } => local_list(root, prefix, &cancellation)?
                 .into_iter()
                 .map(|metadata| local_metadata(root, metadata))
                 .collect(),
@@ -277,6 +276,43 @@ fn local_location(root: &Path, key: &str) -> ObjectLocation {
     ObjectLocation {
         key: root.join(key).to_string_lossy().into_owned(),
         allowed_root: Some(root.to_string_lossy().into_owned()),
+    }
+}
+
+fn local_list(
+    root: &Path,
+    prefix: &str,
+    cancellation: &CancellationToken,
+) -> Result<Vec<crate::object::ObjectMetadata>, NativeFailure> {
+    if prefix.is_empty() {
+        return LocalStore.list(&local_location(root, ""), "", cancellation);
+    }
+
+    let requested = root.join(prefix);
+    match fs::metadata(&requested) {
+        Ok(metadata) if metadata.is_dir() => {
+            LocalStore.list(&local_location(root, prefix), "", cancellation)
+        }
+        Ok(metadata) if metadata.is_file() => LocalStore
+            .head(&local_location(root, prefix), cancellation)
+            .map(|metadata| vec![metadata]),
+        Ok(_) => Ok(Vec::new()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let Some(parent) = Path::new(prefix).parent() else {
+                return Ok(Vec::new());
+            };
+            let parent_key = parent.to_string_lossy();
+            let parent_path = root.join(parent);
+            if !parent_path.is_dir() {
+                return Ok(Vec::new());
+            }
+            let filter = Path::new(prefix)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            LocalStore.list(&local_location(root, &parent_key), &filter, cancellation)
+        }
+        Err(error) => Err(NativeFailure::from_io(Operation::StoreList, &error)),
     }
 }
 

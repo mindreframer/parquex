@@ -2,12 +2,12 @@
 
 ## Progress
 
-- [ ] Phase 6.1: Implement partition planning and scoped discovery.
-- [ ] Phase 6.2: Implement bounded deterministic multi-file streaming.
-- [ ] Phase 6.3: Add exact timestamp and offset filtering.
-- [ ] Phase 6.4: Add projection, statistics and cancellation.
-- [ ] Phase 6.5: Prove partition pruning locally and on RustFS.
-- [ ] Phase 6.6: Pass the epic gate and commit.
+- [x] Phase 6.1: Implement partition planning and scoped discovery.
+- [x] Phase 6.2: Implement bounded deterministic multi-file streaming.
+- [x] Phase 6.3: Add exact timestamp and offset filtering.
+- [x] Phase 6.4: Add projection, statistics and cancellation.
+- [x] Phase 6.5: Prove partition pruning locally and on RustFS.
+- [x] Phase 6.6: Pass the epic gate and commit.
 
 ## Implementation Steps
 
@@ -22,13 +22,13 @@
 
 ## Quality Gate
 
-- [ ] Unrelated partition files are not opened.
-- [ ] Boundary rows obey `[from, until)` exactly.
-- [ ] Empty/missing ranges are empty successes.
-- [ ] Projection/offset filtering remains correct.
-- [ ] Halt/failure releases listing/read resources.
-- [ ] Memory is bounded independently of selected dataset size.
-- [ ] `bin/qa_check.sh` passes.
+- [x] Unrelated partition files are not opened.
+- [x] Boundary rows obey `[from, until)` exactly.
+- [x] Empty/missing ranges are empty successes.
+- [x] Projection/offset filtering remains correct.
+- [x] Halt/failure releases listing/read resources.
+- [x] Memory is bounded independently of selected dataset size.
+- [x] `bin/qa_check.sh` passes.
 
 ## Commit Rule
 

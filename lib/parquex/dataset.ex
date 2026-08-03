@@ -25,7 +25,7 @@ defmodule Parquex.Dataset do
   """
 
   alias Parquex.{Error, Schema, Store, TimePartition}
-  alias Parquex.Dataset.{WriteReport, Writer}
+  alias Parquex.Dataset.{Stream, WriteReport, Writer}
 
   @allowed_options [:schema, :partition_by, :timestamp_unit, :compression]
   @compressions [:zstd, :snappy, :uncompressed]
@@ -111,6 +111,24 @@ defmodule Parquex.Dataset do
         with :ok <- feed(writer, input), do: Writer.close(writer)
       after
         Writer.cancel(writer)
+      end
+    end
+  end
+
+  @doc "Plans and lazily streams one exact half-open UTC time range."
+  @spec stream(t(), keyword()) :: {:ok, Stream.t()} | {:error, Error.t()}
+  def stream(%__MODULE__{} = dataset, options \\ []), do: Stream.open(dataset, options)
+
+  @doc "Materializes all selected rows in one finite dataset time range."
+  @spec read(t(), keyword()) :: {:ok, [map()]} | {:error, Error.t()}
+  def read(%__MODULE__{} = dataset, options \\ []) do
+    with {:ok, stream} <- stream(dataset, options) do
+      try do
+        {:ok, stream |> Enum.to_list() |> Parquex.Input.decode_rows()}
+      rescue
+        error in Error -> {:error, error}
+      after
+        Stream.close(stream)
       end
     end
   end

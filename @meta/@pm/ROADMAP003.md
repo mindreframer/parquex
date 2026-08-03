@@ -1,6 +1,6 @@
 # ROADMAP003 — Simple Streaming Parquet for Object Storage
 
-- **Status:** Active
+- **Status:** Completed at `0.3.0` (2026-08-03)
 - **Target release:** `0.3.0`
 - **Primary interface:** Elixir
 - **Native implementation:** Rust via Rustler

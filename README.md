@@ -190,3 +190,32 @@ bin/qa_check.sh
 ```
 
 The command starts or reuses the project RustFS container and leaves it running for fast repeated checks.
+
+To repeatedly scan a realistic local dataset and inspect BEAM memory, OS RSS,
+and native resource counts:
+
+```elixir
+Parquex.Stress.run(
+  path: "tmp/stress_reference/event_log",
+  iterations: 100,
+  warmup: 3,
+  batch_size: 4_096
+)
+```
+
+This prints compact dot progress, discards the measurement report, and returns
+only `:ok`. Use `Parquex.Stress.measure/1` when you explicitly want the detailed
+report or memory-growth assertions.
+
+The reference directory is gitignored. Copy representative Parquet folders
+there locally, or pass any other directory with `path:`. To repeatedly read
+just one file, pass its complete path instead:
+
+```elixir
+Parquex.Stress.run(
+  path: "tmp/stress_reference/event_log/year=2026/month=5/data_0.parquet",
+  iterations: 100,
+  warmup: 3,
+  batch_size: 4_096
+)
+```

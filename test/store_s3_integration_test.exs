@@ -93,6 +93,22 @@ defmodule Parquex.StoreS3IntegrationTest do
     assert Store.resource_snapshot().active_multipart_uploads == before.active_multipart_uploads
   end
 
+  test "repeated replacement returns multipart resources to baseline", %{store: store} do
+    before = Store.resource_snapshot()
+
+    for value <- 1..10 do
+      bytes = Integer.to_string(value)
+      assert {:ok, %{size: size}} = Store.put(store, "objects/repeated.bin", [bytes])
+      assert size == byte_size(bytes)
+
+      snapshot = Store.resource_snapshot()
+      assert snapshot.active_multipart_uploads == before.active_multipart_uploads
+      assert snapshot.active_s3_requests == before.active_s3_requests
+    end
+
+    assert {:ok, "10"} = Store.read(store, "objects/repeated.bin")
+  end
+
   test "store inspection and failures redact credentials", %{store: store} do
     refute inspect(store) =~ @access
     refute inspect(store) =~ @secret

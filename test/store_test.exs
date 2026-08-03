@@ -92,4 +92,18 @@ defmodule Parquex.StoreTest do
     assert {:ok, "second"} = Store.read(store, "value.bin")
     assert Store.resource_snapshot().active_writers == before.active_writers
   end
+
+  test "repeated replacement returns local writer resources to baseline", %{tmp_dir: tmp_dir} do
+    assert {:ok, store} = Store.open(:local, root: tmp_dir)
+    before = Store.resource_snapshot()
+
+    for value <- 1..100 do
+      bytes = Integer.to_string(value)
+      assert {:ok, %{size: size}} = Store.put(store, "repeated/value.bin", [bytes])
+      assert size == byte_size(bytes)
+      assert Store.resource_snapshot().active_writers == before.active_writers
+    end
+
+    assert {:ok, "100"} = Store.read(store, "repeated/value.bin")
+  end
 end

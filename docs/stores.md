@@ -86,4 +86,3 @@ Publishing to an existing key replaces its value. For concurrent writes to the s
 Local writes use a unique sibling temporary file and replace the destination after the data is complete. S3 writes use multipart upload at the requested final key. Incomplete multipart uploads are aborted on cancellation when the provider accepts the abort request.
 
 A connection failure during S3 multipart completion can make the final result uncertain. Inspect the key with `head/2` or `read/2` before retrying when application-level reconciliation matters.
-

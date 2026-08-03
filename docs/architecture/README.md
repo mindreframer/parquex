@@ -12,4 +12,3 @@ The public flow is:
 Store + key -> Parquet file
 Store + prefix + time partition -> Parquet dataset
 ```
-

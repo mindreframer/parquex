@@ -34,4 +34,3 @@ Attach a handler with the standard `:telemetry` API:
 ```
 
 Detach it during application shutdown or test cleanup with `:telemetry.detach/1`.
-

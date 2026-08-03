@@ -8,4 +8,3 @@
 - Streams projected and filtered Parquet batches with bounded native memory.
 - Writes and reads UTC time-partitioned datasets for minute, hour, day, ISO week, and month folders.
 - Publishes seven precompiled NIF 2.16 archives for macOS, Linux, and Windows.
-

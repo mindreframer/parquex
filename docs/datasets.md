@@ -86,4 +86,3 @@ The stream lists only partition prefixes that overlap the range, opens one file 
 ```
 
 Traversal is deterministic by partition and part key. Applications can sort materialized rows when they require another ordering.
-

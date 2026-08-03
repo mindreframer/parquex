@@ -1,5 +1,10 @@
 # Parquex
 
+[![Hex.pm](https://img.shields.io/hexpm/v/parquex.svg)](https://hex.pm/packages/parquex)
+[![HexDocs](https://img.shields.io/badge/HexDocs-API%20reference-6e4a7e.svg)](https://hexdocs.pm/parquex)
+[![CI](https://github.com/mindreframer/parquex/actions/workflows/ci.yml/badge.svg)](https://github.com/mindreframer/parquex/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mindreframer/parquex/blob/main/LICENSE)
+
 Parquex writes and reads Parquet files on local and S3-compatible object storage from Elixir.
 
 The Parquet encoder, decoder, compression, range reads, and multipart uploads run in Rust. Elixir receives clear store, schema, batch, writer, and stream APIs.

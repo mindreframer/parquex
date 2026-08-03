@@ -3,22 +3,28 @@ defmodule Parquex.MixProject do
 
   @version "0.3.0"
   @source_url "https://github.com/mindreframer/parquex"
+  @authors ["Roman Heinrich <roman.heinrich@gmail.com>"]
 
   def project do
     [
       app: :parquex,
       version: @version,
-      description: "Parquet files and time datasets on local and S3-compatible storage",
+      elixir: "~> 1.20",
+      elixirc_paths: elixirc_paths(Mix.env()),
+      start_permanent: Mix.env() == :prod,
+      description:
+        "Fast, bounded, and ergonomic Parquet streaming for Elixir on local and S3-compatible object storage, powered by Rust",
       source_url: @source_url,
       homepage_url: @source_url,
-      elixir: "~> 1.20",
-      start_permanent: Mix.env() == :prod,
-      deps: deps(),
-      test_ignore_filters: [&String.starts_with?(&1, "test/support/")],
+      authors: @authors,
+      package: package(),
       docs: docs(),
-      package: package()
+      deps: deps()
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_env), do: ["lib"]
 
   # Run "mix help compile.app" to learn about applications.
   def application do
@@ -53,23 +59,39 @@ defmodule Parquex.MixProject do
         "docs/architecture/storage.md",
         "docs/architecture/streaming.md",
         "docs/architecture/native-runtime.md"
-      ]
+      ],
+      source_ref: "v#{@version}",
+      source_url: @source_url,
+      authors: @authors,
+      formatters: ["html"]
     ]
   end
 
   defp package do
     [
-      files:
-        ~w(lib native/parquex_nif/src native/parquex_nif/Cargo.toml
-           native/parquex_nif/Cargo.lock README.md CHANGELOG.md SECURITY.md
-           LICENSE docs mix.exs rust-toolchain.toml .cargo/config.toml) ++
-          Path.wildcard("checksum-Elixir.Parquex.Native.exs"),
-      licenses: ["LicenseRef-Proprietary"],
+      licenses: ["MIT"],
+      maintainers: @authors,
       links: %{
-        "Documentation" => "https://hexdocs.pm/parquex",
         "Source" => @source_url,
-        "Package" => "https://hex.pm/packages/parquex"
-      }
+        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
+      },
+      build_tools: ["mix", "cargo"],
+      files:
+        [
+          "lib",
+          "native/parquex_nif/src",
+          "native/parquex_nif/Cargo.toml",
+          "native/parquex_nif/Cargo.lock",
+          ".cargo/config.toml",
+          "rust-toolchain.toml",
+          ".formatter.exs",
+          "mix.exs",
+          "README.md",
+          "LICENSE",
+          "CHANGELOG.md",
+          "SECURITY.md",
+          "docs"
+        ] ++ Path.wildcard("checksum-Elixir.Parquex.Native.exs")
     ]
   end
 end

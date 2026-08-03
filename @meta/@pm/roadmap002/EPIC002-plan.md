@@ -2,12 +2,12 @@
 
 ## Progress
 
-- [ ] Phase 2.1: Add native reusable store resources.
-- [ ] Phase 2.2: Implement local store construction and key safety.
-- [ ] Phase 2.3: Implement reusable S3 store construction.
-- [ ] Phase 2.4: Expose key-based object operations and lifecycle.
-- [ ] Phase 2.5: Harden local/RustFS parity and reuse.
-- [ ] Phase 2.6: Pass the epic gate and commit.
+- [x] Phase 2.1: Add native reusable store resources.
+- [x] Phase 2.2: Implement local store construction and key safety.
+- [x] Phase 2.3: Implement reusable S3 store construction.
+- [x] Phase 2.4: Expose key-based object operations and lifecycle.
+- [x] Phase 2.5: Harden local/RustFS parity and reuse.
+- [x] Phase 2.6: Pass the epic gate and commit.
 
 ## Implementation Steps
 
@@ -21,12 +21,12 @@
 
 ## Quality Gate
 
-- [ ] One store serves repeated keys with stable native identity.
-- [ ] Local and RustFS pass the same object behavior.
-- [ ] Key traversal/root escape is rejected.
-- [ ] Conflicts and failures preserve destination data and cleanup.
-- [ ] Errors/inspection disclose no credentials or keys.
-- [ ] `bin/qa_check.sh` passes.
+- [x] One store serves repeated keys with stable native identity.
+- [x] Local and RustFS pass the same object behavior.
+- [x] Key traversal/root escape is rejected.
+- [x] Conflicts and failures preserve destination data and cleanup.
+- [x] Errors/inspection disclose no credentials or keys.
+- [x] `bin/qa_check.sh` passes.
 
 ## Commit Rule
 

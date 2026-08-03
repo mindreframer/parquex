@@ -25,6 +25,7 @@ static ACTIVE_MULTIPART: AtomicUsize = AtomicUsize::new(0);
 static RANGE_REQUESTS: AtomicU64 = AtomicU64::new(0);
 static RANGE_BYTES: AtomicU64 = AtomicU64::new(0);
 static STAGE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static CLIENTS_CREATED: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, rustler::NifMap)]
 pub(crate) struct S3Config {
@@ -59,6 +60,66 @@ pub(crate) struct RemoteObject {
     config: S3Config,
 }
 
+#[derive(Clone)]
+pub(crate) struct RemoteStore {
+    store: Arc<dyn ObjectStore>,
+    config: S3Config,
+}
+
+impl Debug for RemoteStore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RemoteStore")
+            .field("bucket", &self.config.bucket)
+            .field("base_prefix", &self.config.key)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RemoteStore {
+    pub(crate) fn new(config: S3Config) -> Result<Self, NativeFailure> {
+        let store = build_store(&config)?;
+        Ok(Self { store, config })
+    }
+
+    pub(crate) fn object(&self, key: &str) -> Result<RemoteObject, NativeFailure> {
+        let combined = join_key(&self.config.key, key);
+        let path = Path::parse(&combined)
+            .map_err(|_| NativeFailure::invalid(Operation::StoreOpen, "object key is invalid"))?;
+        let mut config = self.config.clone();
+        config.key = combined;
+        Ok(RemoteObject {
+            store: self.store.clone(),
+            path,
+            config,
+        })
+    }
+
+    pub(crate) fn base_prefix(&self) -> &str {
+        &self.config.key
+    }
+
+    pub(crate) fn list(
+        &self,
+        prefix: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<RemoteMetadata>, NativeFailure> {
+        let mut entries = self.object("")?.list(prefix, cancellation)?;
+        let base = self.base_prefix().trim_matches('/');
+        if !base.is_empty() {
+            let marker = format!("{base}/");
+            for entry in &mut entries {
+                entry.key = entry
+                    .key
+                    .strip_prefix(&marker)
+                    .unwrap_or(&entry.key)
+                    .to_owned();
+            }
+        }
+        Ok(entries)
+    }
+}
+
 impl Debug for RemoteObject {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -71,14 +132,10 @@ impl Debug for RemoteObject {
 
 impl RemoteObject {
     pub(crate) fn new(config: S3Config) -> Result<Self, NativeFailure> {
-        let path = Path::parse(&config.key)
-            .map_err(|_| NativeFailure::invalid(Operation::S3Head, "S3 object key is invalid"))?;
-        let store = build_store(&config)?;
-        Ok(Self {
-            store,
-            path,
-            config,
-        })
+        let key = config.key.clone();
+        let mut store_config = config;
+        store_config.key.clear();
+        RemoteStore::new(store_config)?.object(&key)
     }
 
     pub(crate) fn head(
@@ -325,13 +382,14 @@ impl Drop for RemoteMultipartWriter {
     }
 }
 
-pub(crate) fn resource_snapshot() -> (usize, usize, usize, u64, u64) {
+pub(crate) fn resource_snapshot() -> (usize, usize, usize, u64, u64, u64) {
     (
         ACTIVE_REQUESTS.load(Ordering::Relaxed),
         PEAK_REQUESTS.load(Ordering::Relaxed),
         ACTIVE_MULTIPART.load(Ordering::Relaxed),
         RANGE_REQUESTS.load(Ordering::Relaxed),
         RANGE_BYTES.load(Ordering::Relaxed),
+        CLIENTS_CREATED.load(Ordering::Relaxed),
     )
 }
 
@@ -340,10 +398,16 @@ fn build_store(config: &S3Config) -> Result<Arc<dyn ObjectStore>, NativeFailure>
         AmazonS3Builder::from_env()
     } else if config.credential_provider == atoms::explicit() {
         let access_key = config.access_key_id.clone().ok_or_else(|| {
-            NativeFailure::invalid(Operation::S3Head, "explicit S3 credentials are incomplete")
+            NativeFailure::invalid(
+                Operation::StoreOpen,
+                "explicit S3 credentials are incomplete",
+            )
         })?;
         let secret_key = config.secret_access_key.clone().ok_or_else(|| {
-            NativeFailure::invalid(Operation::S3Head, "explicit S3 credentials are incomplete")
+            NativeFailure::invalid(
+                Operation::StoreOpen,
+                "explicit S3 credentials are incomplete",
+            )
         })?;
         let mut builder = AmazonS3Builder::new()
             .with_access_key_id(access_key)
@@ -382,6 +446,7 @@ fn build_store(config: &S3Config) -> Result<Arc<dyn ObjectStore>, NativeFailure>
     let store = builder.build().map_err(|_| {
         NativeFailure::invalid(Operation::S3Head, "S3 client configuration is invalid")
     })?;
+    CLIENTS_CREATED.fetch_add(1, Ordering::Relaxed);
     Ok(Arc::new(LimitStore::new(
         store,
         config.max_request_concurrency,

@@ -9,6 +9,7 @@ mod local;
 mod object;
 mod reader;
 mod s3;
+mod store;
 mod writer;
 
 use error::NativeFailure;
@@ -18,6 +19,7 @@ use object::{
     StagedWrite, SyncPolicy, WriteOptions,
 };
 use s3::{RemoteMultipartWriter, RemoteObject, S3Config};
+use store::{StoreResource, StoreWriter};
 
 pub(crate) mod atoms {
     rustler::atoms! {
@@ -104,7 +106,17 @@ pub(crate) mod atoms {
         s3_writer_open,
         s3_writer_write,
         s3_writer_publish,
-        s3_writer_abort
+        s3_writer_abort,
+        store_open,
+        store_identity,
+        store_head,
+        store_read_range,
+        store_list,
+        store_delete,
+        store_writer_open,
+        store_writer_write,
+        store_writer_publish,
+        store_writer_abort
     }
 }
 
@@ -138,6 +150,16 @@ pub(crate) enum Operation {
     S3WriterWrite,
     S3WriterPublish,
     S3WriterAbort,
+    StoreOpen,
+    StoreIdentity,
+    StoreHead,
+    StoreReadRange,
+    StoreList,
+    StoreDelete,
+    StoreWriterOpen,
+    StoreWriterWrite,
+    StoreWriterPublish,
+    StoreWriterAbort,
 }
 
 impl Operation {
@@ -171,6 +193,16 @@ impl Operation {
             Self::S3WriterWrite => atoms::s3_writer_write(),
             Self::S3WriterPublish => atoms::s3_writer_publish(),
             Self::S3WriterAbort => atoms::s3_writer_abort(),
+            Self::StoreOpen => atoms::store_open(),
+            Self::StoreIdentity => atoms::store_identity(),
+            Self::StoreHead => atoms::store_head(),
+            Self::StoreReadRange => atoms::store_read_range(),
+            Self::StoreList => atoms::store_list(),
+            Self::StoreDelete => atoms::store_delete(),
+            Self::StoreWriterOpen => atoms::store_writer_open(),
+            Self::StoreWriterWrite => atoms::store_writer_write(),
+            Self::StoreWriterPublish => atoms::store_writer_publish(),
+            Self::StoreWriterAbort => atoms::store_writer_abort(),
         }
     }
 }
@@ -233,6 +265,9 @@ struct ResourceSnapshot {
     active_multipart_uploads: usize,
     s3_range_requests: u64,
     s3_range_bytes: u64,
+    active_stores: usize,
+    stores_created: u64,
+    s3_clients_created: u64,
 }
 
 #[derive(rustler::NifMap)]
@@ -251,6 +286,21 @@ struct WriterResource {
 struct S3WriterResource {
     writer: Mutex<RemoteMultipartWriter>,
     cancellation: std::sync::Arc<CancellationToken>,
+}
+
+struct StoreWriterResource {
+    writer: Mutex<StoreWriter>,
+    cancellation: std::sync::Arc<CancellationToken>,
+}
+
+#[rustler::resource_impl]
+impl Resource for StoreWriterResource {
+    fn down(&self, _env: Env<'_>, _pid: LocalPid, _monitor: Monitor) {
+        self.cancellation.cancel();
+        if let Ok(mut writer) = self.writer.lock() {
+            let _ignored = writer.abort();
+        }
+    }
 }
 
 #[rustler::resource_impl]
@@ -299,6 +349,42 @@ fn lock_s3_writer(
         .map_err(|_| NativeFailure::expected(operation, "native S3 writer state is unavailable"))
 }
 
+fn lock_store_writer(
+    writer: &ResourceArc<StoreWriterResource>,
+    operation: Operation,
+) -> Result<std::sync::MutexGuard<'_, StoreWriter>, NativeFailure> {
+    writer
+        .writer
+        .lock()
+        .map_err(|_| NativeFailure::expected(operation, "native store writer is unavailable"))
+}
+
+fn write_policies(
+    flush: rustler::Atom,
+    sync: rustler::Atom,
+    operation: Operation,
+) -> Result<(FlushPolicy, SyncPolicy), NativeFailure> {
+    let flush = if flush == atoms::none() {
+        FlushPolicy::None
+    } else if flush == atoms::each_chunk() {
+        FlushPolicy::EachChunk
+    } else if flush == atoms::before_publish() {
+        FlushPolicy::BeforePublish
+    } else {
+        return Err(NativeFailure::invalid(operation, "invalid flush policy"));
+    };
+    let sync = if sync == atoms::none() {
+        SyncPolicy::None
+    } else if sync == atoms::data() {
+        SyncPolicy::Data
+    } else if sync == atoms::all() {
+        SyncPolicy::All
+    } else {
+        return Err(NativeFailure::invalid(operation, "invalid sync policy"));
+    };
+    Ok((flush, sync))
+}
+
 #[rustler::nif]
 fn smoke(env: Env<'_>) -> Term<'_> {
     encode_guarded(env, Operation::Smoke, || Ok(1_u32))
@@ -311,6 +397,128 @@ fn smoke_error(env: Env<'_>) -> Term<'_> {
             Operation::SmokeError,
             "native smoke error",
         ))
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn store_open_local(env: Env<'_>, root: String) -> Term<'_> {
+    encode_guarded(env, Operation::StoreOpen, || {
+        Ok(ResourceArc::new(StoreResource::open_local(root)?))
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn store_open_s3(env: Env<'_>, config: S3Config) -> Term<'_> {
+    encode_guarded(env, Operation::StoreOpen, || {
+        Ok(ResourceArc::new(StoreResource::open_s3(config)?))
+    })
+}
+
+#[rustler::nif]
+fn store_identity(env: Env<'_>, store: ResourceArc<StoreResource>) -> Term<'_> {
+    encode_guarded(env, Operation::StoreIdentity, || Ok(store.identity()))
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn store_head(env: Env<'_>, store: ResourceArc<StoreResource>, key: String) -> Term<'_> {
+    encode_guarded(env, Operation::StoreHead, || store.head(&key))
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn store_read_range<'a>(
+    env: Env<'a>,
+    store: ResourceArc<StoreResource>,
+    key: String,
+    offset: u64,
+    length: u64,
+) -> Term<'a> {
+    match guarded(Operation::StoreReadRange, || {
+        store.read_range(&key, offset, length)
+    }) {
+        Ok(bytes) => match OwnedBinary::new(bytes.len()) {
+            Some(mut binary) => {
+                binary.as_mut_slice().copy_from_slice(&bytes);
+                (atoms::ok(), binary.release(env)).encode(env)
+            }
+            None => (
+                atoms::error(),
+                NativeFailure::expected(Operation::StoreReadRange, "binary allocation failed")
+                    .payload(),
+            )
+                .encode(env),
+        },
+        Err(failure) => (atoms::error(), failure.payload()).encode(env),
+    }
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn store_list(env: Env<'_>, store: ResourceArc<StoreResource>, prefix: String) -> Term<'_> {
+    encode_guarded(env, Operation::StoreList, || store.list(&prefix))
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn store_delete(env: Env<'_>, store: ResourceArc<StoreResource>, key: String) -> Term<'_> {
+    encode_guarded(env, Operation::StoreDelete, || {
+        store.delete(&key)?;
+        Ok(atoms::deleted())
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn store_writer_open(
+    env: Env<'_>,
+    store: ResourceArc<StoreResource>,
+    key: String,
+    flush: rustler::Atom,
+    sync: rustler::Atom,
+    owner: LocalPid,
+) -> Term<'_> {
+    encode_guarded(env, Operation::StoreWriterOpen, || {
+        let (flush, sync) = write_policies(flush, sync, Operation::StoreWriterOpen)?;
+        let cancellation = std::sync::Arc::new(CancellationToken::default());
+        let writer = store.open_writer(&key, flush, sync, cancellation.clone())?;
+        let resource = ResourceArc::new(StoreWriterResource {
+            writer: Mutex::new(writer),
+            cancellation,
+        });
+        if env.monitor(&resource, &owner).is_none() {
+            lock_store_writer(&resource, Operation::StoreWriterOpen)?.abort()?;
+            return Err(NativeFailure::expected(
+                Operation::StoreWriterOpen,
+                "could not monitor store writer owner",
+            ));
+        }
+        Ok(resource)
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn store_writer_write<'a>(
+    env: Env<'a>,
+    writer: ResourceArc<StoreWriterResource>,
+    data: Binary<'a>,
+) -> Term<'a> {
+    encode_guarded(env, Operation::StoreWriterWrite, || {
+        lock_store_writer(&writer, Operation::StoreWriterWrite)?.write(data.as_slice())
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn store_writer_publish(env: Env<'_>, writer: ResourceArc<StoreWriterResource>) -> Term<'_> {
+    encode_guarded(env, Operation::StoreWriterPublish, || {
+        lock_store_writer(&writer, Operation::StoreWriterPublish)?.publish()
+    })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+fn store_writer_abort(env: Env<'_>, writer: ResourceArc<StoreWriterResource>) -> Term<'_> {
+    encode_guarded(env, Operation::StoreWriterAbort, || {
+        let aborted = lock_store_writer(&writer, Operation::StoreWriterAbort)?.abort()?;
+        Ok(if aborted {
+            atoms::aborted()
+        } else {
+            atoms::closed()
+        })
     })
 }
 
@@ -598,7 +806,9 @@ fn resource_snapshot(env: Env<'_>) -> Term<'_> {
             active_multipart_uploads,
             s3_range_requests,
             s3_range_bytes,
+            s3_clients_created,
         ) = s3::resource_snapshot();
+        let (active_stores, stores_created) = store::resource_snapshot();
         Ok(ResourceSnapshot {
             active_writers,
             active_readers: reader::active_readers(),
@@ -608,6 +818,9 @@ fn resource_snapshot(env: Env<'_>) -> Term<'_> {
             active_multipart_uploads,
             s3_range_requests,
             s3_range_bytes,
+            active_stores,
+            stores_created,
+            s3_clients_created,
         })
     })
 }

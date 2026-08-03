@@ -46,6 +46,21 @@ defmodule Parquex.Native do
   @spec smoke_error() :: {:error, map()}
   def smoke_error, do: :erlang.nif_error(:nif_not_loaded)
 
+  def store_open_local(_root), do: :erlang.nif_error(:nif_not_loaded)
+  def store_open_s3(_config), do: :erlang.nif_error(:nif_not_loaded)
+  def store_identity(_store), do: :erlang.nif_error(:nif_not_loaded)
+  def store_head(_store, _key), do: :erlang.nif_error(:nif_not_loaded)
+  def store_read_range(_store, _key, _offset, _length), do: :erlang.nif_error(:nif_not_loaded)
+  def store_list(_store, _prefix), do: :erlang.nif_error(:nif_not_loaded)
+  def store_delete(_store, _key), do: :erlang.nif_error(:nif_not_loaded)
+
+  def store_writer_open(_store, _key, _flush, _sync, _owner),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def store_writer_write(_writer, _data), do: :erlang.nif_error(:nif_not_loaded)
+  def store_writer_publish(_writer), do: :erlang.nif_error(:nif_not_loaded)
+  def store_writer_abort(_writer), do: :erlang.nif_error(:nif_not_loaded)
+
   def local_head(_path, _allowed_root), do: :erlang.nif_error(:nif_not_loaded)
 
   def local_read_range(_path, _allowed_root, _offset, _length),

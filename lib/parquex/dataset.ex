@@ -5,8 +5,8 @@ defmodule Parquex.Dataset do
   A dataset combines a reusable `Parquex.Store`, an immutable object-key
   prefix, an explicit schema and a UTC event-time partition specification.
   Dataset writers route each row by its event timestamp into canonical UTC
-  paths and publish immutable Parquet parts. Time-range reading is added by
-  Roadmap 002 Epic 6.
+  paths and publish immutable Parquet parts. Dataset streams lazily discover
+  only overlapping partitions and apply exact half-open time filtering.
 
   ## Examples
 

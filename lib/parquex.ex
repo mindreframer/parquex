@@ -7,9 +7,8 @@ defmodule Parquex do
   `Parquex.Dataset`. Streaming remains the safe interface for large data;
   finite read/write helpers explicitly materialize their input or output.
 
-  `Parquex.Location`, `Parquex.Object`, `scan/2`, `write/4`, and `append/4`
-  remain available as the `0.1.x` compatibility surface while Roadmap 002 moves
-  their proven native behavior behind the store/key API. Completed Parquet
+  `Parquex.Location`, `Parquex.Object`, `scan/2`, location-form `write/4`, and
+  `append/4` remain available as the `0.1.x` compatibility surface. Completed Parquet
   objects remain immutable: dataset writes create new parts rather than
   appending bytes to an existing file.
 

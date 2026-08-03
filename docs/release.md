@@ -1,8 +1,8 @@
-# Initial release contract
+# 0.2 release contract
 
 ## Supported matrix
 
-Parquex 0.1.0 is built and gated with:
+Parquex 0.2.0 is built and gated with:
 
 | Component | Supported baseline |
 | --- | --- |
@@ -20,16 +20,19 @@ unsupported is surfaced as `:unsupported` rather than used for replacement.
 
 ## Compatibility expectations
 
-The 0.1 series stabilizes public module/function names, option names/defaults,
-schema and batch representations, stable error categories, caller ordering,
-and cancellation behavior documented in this repository. Additive telemetry
-measurements and safe error detail fields may appear in compatible releases;
-applications should not require an exact map key set.
+The 0.2 primary contract is `Store -> key -> object` and `Store -> Dataset`.
+The location-first 0.1 modules remain available for compatibility. The 0.2
+series stabilizes the documented Store/Dataset module and option names,
+canonical UTC partition paths, half-open range semantics, schema and batch
+representations, stable error categories, deterministic traversal, and
+cancellation behavior. Additive telemetry/stat measurements and safe error
+detail fields may appear in compatible releases; applications should not
+require an exact map key set.
 
-Streams are single-pass. Completed objects are immutable. Publication is
-create-only and complete-or-absent, but remote publication is not an
-exactly-once transaction. S3 callers must reconcile ambiguous transport failure
-with object metadata.
+Streams are single-pass. Completed objects and dataset parts are immutable.
+Object publication is create-only and complete-or-absent, but a whole dataset
+write is not atomic and remote publication is not an exactly-once transaction.
+S3 callers must reconcile ambiguous transport failure with object metadata.
 
 ## Native build
 
@@ -61,10 +64,17 @@ reusable local RustFS environment.
   choose a new immutable name.
 - Use stream/writer stats and the documented telemetry events before increasing
   prefetch, range concurrency, or multipart in-flight limits.
+- Dataset write memory scales with `max_open_partitions`, `batch_rows`, Parquet
+  encoder bounds, and multipart bounds. `max_bytes_per_file` is an estimated
+  uncompressed rotation target rather than an encoded-size limit.
+- Dataset range planning is bounded by `max_partitions`; reads list one planned
+  prefix and open one file at a time. `Dataset.read/2` intentionally
+  materializes the selected result.
 
 ## Explicitly deferred
 
-The initial release does not include DataFusion, SQL, a general expression
-engine, Delta Lake, Iceberg, catalogs, manifests, transaction logs, partition
-discovery, application storage blending/routing/cache/synchronization policy,
-or background compaction scheduling and orchestration.
+The 0.2 release does not include DataFusion, SQL, joins/aggregations, a general
+expression engine, Delta Lake, Iceberg, catalogs, manifests, transaction logs,
+schema evolution, application storage blending/routing/cache/synchronization
+policy, global multi-file sorting, or background compaction scheduling and
+orchestration.

@@ -2,10 +2,10 @@
 
 ## Progress
 
-- [ ] Phase 7.1: Harden real-schema, memory and lifecycle behavior.
-- [ ] Phase 7.2: Complete corrected API and migration documentation.
-- [ ] Phase 7.3: Synchronize package/native version `0.2.0` and release metadata.
-- [ ] Phase 7.4: Pass the final local QA gate and commit the epic.
+- [x] Phase 7.1: Harden real-schema, memory and lifecycle behavior.
+- [x] Phase 7.2: Complete corrected API and migration documentation.
+- [x] Phase 7.3: Synchronize package/native version `0.2.0` and release metadata.
+- [x] Phase 7.4: Pass the final local QA gate and commit the epic.
 - [ ] Phase 7.5: Publish and verify all seven precompiled NIFs.
 - [ ] Phase 7.6: Generate/commit checksums and pass clean-consumer CI.
 - [ ] Phase 7.7: Mark ROADMAP002 completed and pass final CI.
@@ -24,11 +24,11 @@
 
 ## Quality Gate
 
-- [ ] Real event-shaped datasets pass every granularity and codec scenario.
-- [ ] Live native resources return to baseline and repeated RSS plateaus.
-- [ ] Docs/examples/package checks are accurate and green.
-- [ ] Source/Cargo/changelog agree on `0.2.0`.
-- [ ] `bin/qa_check.sh` passes before the epic commit.
+- [x] Real event-shaped datasets pass every granularity and codec scenario.
+- [x] Live native resources return to baseline and repeated RSS plateaus.
+- [x] Docs/examples/package checks are accurate and green.
+- [x] Source/Cargo/changelog agree on `0.2.0`.
+- [x] `bin/qa_check.sh` passes before the epic commit.
 - [ ] Release workflow succeeds for all seven targets.
 - [ ] `v0.2.0` has exactly seven assets and checksums match.
 - [ ] Every clean consumer and Docker/RustFS CI job is green.

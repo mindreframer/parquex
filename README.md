@@ -1,246 +1,269 @@
 # Parquex
 
-Parquex is an Elixir binding for streaming Parquet through local and
-S3-compatible object storage. Its primary interface is pull-based and
-backpressured: object size and result cardinality must not determine peak memory
-usage.
+Parquex is an Elixir library for bounded Parquet objects and UTC
+time-partitioned Parquet datasets on local or S3-compatible object storage. Its
+Rust layer owns the reusable object-store client, Parquet encoding and decoding,
+compression, bounded range reads, multipart uploads, and calendar partition
+calculation.
 
-The object layer supports local files and S3-compatible storage through the
-same bounded range and create-only publication contracts. Parquet reads and
-writes are lazy and bounded by explicit batch, prefetch, range, request,
-multipart, row-group, and page limits. The native diagnostic verifies the
-packaged Rustler boundary:
+The primary 0.2 model is:
 
-```elixir
-{:ok, %{api_version: 1}} = Parquex.native_status()
+```text
+Store -> object key -> Parquet object
+Store -> dataset prefix + time partition -> immutable Parquet parts
 ```
 
-## Local object access
+Parquex does not try to be a dataframe or SQL engine. It focuses on predictable
+storage I/O for applications that want to write event batches as compressed
+Parquet, stream them directly to object storage, and later read exact time
+ranges without making total dataset size determine peak memory.
 
-Locations carry their own allowed-root and range bounds:
+## Reusable stores
+
+A store configures one namespace once. Every operation uses relative keys, and
+an S3 store reuses one native client across object and Parquet operations.
 
 ```elixir
-{:ok, location} =
-  Parquex.Location.new("/data/events/part-001.bin",
-    allowed_root: "/data/events",
-    max_range_bytes: 1_048_576
+{:ok, local} = Parquex.Store.open(:local, root: "/data")
+
+{:ok, s3} =
+  Parquex.Store.open(:s3,
+    bucket: "events",
+    prefix: "production",
+    region: "eu-central-1",
+    credential_provider: :standard
   )
 
-{:ok, metadata} = Parquex.Object.head(location)
-{:ok, bytes} = Parquex.Object.read_range(location, 4_096, 64 * 1_024)
+{:ok, metadata} = Parquex.Store.put(s3, "health/value.bin", ["bounded", "-write"])
+{:ok, "bounded"} = Parquex.Store.read_range(s3, "health/value.bin", 0, 7)
+{:ok, objects} = Parquex.Store.list(s3, "health")
 ```
 
-Range reads return at most the requested length, return an empty binary at exact
-EOF, return a partial final range, and reject offsets beyond EOF. They seek and
-read only the bounded range rather than loading the complete file.
+`Store.read/2` is an explicitly finite convenience that materializes one object
+through bounded ranges. `Store.open_writer/3` and its write/publish/cancel
+lifecycle consume one bounded chunk at a time. Publication is create-only:
+conflicts preserve the existing object, and cancellation or owner exit cleans
+owned staging.
 
-New immutable objects accept an enumerable of bounded iodata chunks:
+S3 endpoints, explicit credentials, bounded retries, range sizes, request
+concurrency, multipart part size, and in-flight parts are configurable.
+Credentials are redacted from inspection and errors. See
+[`docs/stores.md`](docs/stores.md) and [`docs/s3.md`](docs/s3.md).
+
+## One Parquet object
+
+Finite row maps and column maps can infer a deterministic schema. This helper
+materializes its input:
 
 ```elixir
-{:ok, metadata} =
-  Parquex.Object.put(location, chunks,
-    flush: :before_publish,
-    sync: :data
+rows = [
+  %{"id" => 1, "name" => "one", "occurred_at" => ~U[2026-08-03 10:00:00Z]},
+  %{"id" => 2, "name" => "two", "occurred_at" => ~U[2026-08-03 10:00:01Z]}
+]
+
+{:ok, _metadata} =
+  Parquex.write(s3, "objects/events.parquet", rows,
+    compression: :zstd,
+    batch_rows: 1_024
   )
+
+{:ok, materialized_rows} = Parquex.read(s3, "objects/events.parquet")
 ```
 
-Writers use a unique sibling temporary file and create-only publication. An
-existing destination returns `:conflict` without changing its bytes. Explicit
-cancellation, producer failure, or writer-owner exit removes owned staging.
+Inference supports signed 64-bit integers, 64-bit floats, booleans, UTF-8
+strings, binary values, UTC `DateTime` values, and nullability. Empty or
+all-null input requires an explicit schema.
 
-## S3-compatible object storage
-
-Every S3 descriptor owns its endpoint, credentials, retry, timeout, range,
-request-concurrency, and multipart bounds:
+For large or continuous input, keep the schema and bounded batches explicit:
 
 ```elixir
-{:ok, remote} =
-  Parquex.Location.new("s3://analytics/events/part-001.parquet",
-    endpoint: "https://objects.example.com",
-    region: "us-east-1",
-    path_style: true,
-    credential_provider: :standard,
-    max_range_bytes: 1_048_576,
-    max_request_concurrency: 4,
-    multipart_part_size: 8 * 1024 * 1024,
-    max_in_flight_parts: 2
+schema =
+  Parquex.Schema.new!([
+    {:id, :int64, false},
+    {:payload, :binary, true}
+  ])
+
+{:ok, writer} =
+  Parquex.open_writer(s3, "objects/streamed.parquet", schema,
+    compression: :zstd,
+    max_batch_rows: 65_536,
+    max_row_group_rows: 1_048_576
   )
-
-{:ok, stream} = Parquex.scan(remote, columns: ["event_id"], batch_size: 1_024)
-```
-
-Explicit credentials are also supported and are redacted from descriptor
-inspection and errors. S3 writes upload bounded multipart staging objects and
-publish create-only after the Parquet footer closes. See
-[`docs/s3.md`](docs/s3.md) for the complete contract and RustFS workflow.
-
-## Streaming Parquet reads
-
-`Parquex.scan/2` returns a single-pass enumerable of bounded columnar batches.
-Opening reads footer and schema metadata; data pages are fetched and decoded
-only as the consumer asks for batches:
-
-```elixir
-{:ok, location} =
-  Parquex.Location.new("/data/events/part-001.parquet",
-    allowed_root: "/data/events",
-    max_range_bytes: 1_048_576
-  )
-
-{:ok, stream} =
-  Parquex.scan(location,
-    columns: ["event_id", "occurred_at"],
-    batch_size: 1_024,
-    prefetch_depth: 2
-  )
-
-Enum.each(stream, fn batch ->
-  {:ok, event_ids} = Parquex.Batch.column(batch, "event_id")
-  consume(event_ids)
-end)
-```
-
-Halting enumeration or raising in the consumer closes the native reader.
-`Parquex.Stream.close/1` provides explicit, idempotent cancellation. Use
-`Parquex.schema/2` for schema-only inspection and `Parquex.Batch.to_rows/1` only
-when row maps for one bounded batch are actually needed.
-
-The supported schema/value mappings and buffering envelope are documented in
-[`docs/parquet-reads.md`](docs/parquet-reads.md).
-
-## Append-oriented filtering and mixed inputs
-
-`Parquex.append/4` creates a collision-resistant new `.parquet` object beneath
-an explicit local directory or S3 prefix. A caller may provide a basename with
-`name:`, but publication remains create-only and never appends bytes to a
-completed object.
-
-Scans accept one typed comparison with `:where` and may combine it with a
-returned projection. Predicate-only columns are read for correctness and
-removed from the emitted schema; conservative min/max pruning skips a row group
-only when exact statistics prove it cannot match:
-
-```elixir
-{:ok, stream} =
-  Parquex.scan([local_part, s3_part],
-    columns: ["payload"],
-    where: {:gt, "offset", 10_000},
-    batch_size: 1_024,
-    prefetch_depth: 1,
-    source_concurrency: 2
-  )
-```
-
-Mixed scans preserve caller source order and lazily keep one source active,
-which is within the configured source-concurrency limit. See
-[`docs/append-filtering.md`](docs/append-filtering.md) for null semantics,
-pruning metrics, cancellation, and the bounded rewrite pattern.
-
-## Streaming Parquet writes
-
-`Parquex.write/4` consumes one compatible bounded batch at a time and publishes
-only after the Parquet footer is complete:
-
-```elixir
-alias Parquex.Schema.Field
-
-schema = %Parquex.Schema{
-  fields: [
-    %Field{name: "event_id", type: {:integer, 64, true}, nullable: false},
-    %Field{name: "payload", type: :binary, nullable: true}
-  ]
-}
 
 {:ok, batch} =
   Parquex.Batch.new(schema, %{
-    "event_id" => [1, 2],
+    "id" => [1, 2],
     "payload" => [<<1>>, nil]
   })
 
-{:ok, metadata} =
-  Parquex.write(location, schema, [batch],
-    compression: :snappy,
-    max_batch_rows: 65_536,
-    max_row_group_rows: 1_048_576,
-    data_page_size_limit: 1_048_576
+:ok = Parquex.Writer.write_batch(writer, batch)
+{:ok, _metadata} = Parquex.Writer.close(writer)
+```
+
+`Parquex.stream/3` pulls one bounded `Parquex.Batch` at a time. Projection,
+batch size, prefetch depth, and one typed comparison are supported. Halting or
+raising in a consumer closes the native reader.
+
+```elixir
+{:ok, stream} =
+  Parquex.stream(s3, "objects/streamed.parquet",
+    columns: [:payload],
+    where: {:gt, "id", 1},
+    batch_size: 1_024
+  )
+
+Enum.each(stream, &consume_batch/1)
+```
+
+## UTC time-partitioned datasets
+
+A dataset combines a store, key prefix, explicit schema, compression, and one
+event-time partition. Version 0.2 supports `:minute`, `:hour`, `:day`, `:week`,
+and `:month` in UTC.
+
+```elixir
+event_schema =
+  Parquex.Schema.new!([
+    {:occurred_at, {:timestamp, :microsecond}, false},
+    {:space_id, :string, false},
+    {:sequence, :int64, false},
+    {:event_type, :string, false},
+    {:payload, :string, false}
+  ])
+
+dataset =
+  Parquex.Dataset.new!(s3, "event_log",
+    schema: event_schema,
+    partition_by: {:time, :occurred_at, :hour},
+    timestamp_unit: :microsecond,
+    compression: :zstd
+  )
+
+events = [
+  %{
+    "occurred_at" => ~U[2026-08-03 10:10:00Z],
+    "space_id" => "space-42",
+    "sequence" => 101,
+    "event_type" => "card.updated",
+    "payload" => ~s({"card":"a"})
+  }
+]
+
+{:ok, report} =
+  Parquex.Dataset.write(dataset, events,
+    max_open_partitions: 4,
+    max_rows_per_file: 100_000,
+    max_bytes_per_file: 64 * 1024 * 1024,
+    batch_rows: 1_024
   )
 ```
 
-The destination is create-only: a conflict preserves the existing bytes.
-Producer failure, cancellation, or owner exit removes owned local or remote
-staging. See [`docs/parquet-writes.md`](docs/parquet-writes.md) for codecs, the
-empty-input policy, incremental writer operations, and memory limits.
+The example writes keys shaped like:
 
-## Observability and release contract
+```text
+event_log/year=2026/month=8/day=3/hour=10/part-….parquet
+```
 
-Parquex emits safe `:telemetry` events for operation duration/status, storage
-bytes and ranges, rows and batches, row groups read/skipped, retryable failures,
-cancellation, and current/peak buffering. Event metadata never contains
-locations, credentials, object keys, schemas, column names, exception messages,
-or row contents. See [`docs/telemetry.md`](docs/telemetry.md).
+Week partitions use `iso_year=2026/week=32`. Values are canonical unpadded
+base-10 integers. Late events create another immutable part under the older
+partition; completed files are never modified.
 
-The supported toolchain, compatibility expectations, native source build,
-tuning guidance, troubleshooting, and explicitly deferred scope are in
-[`docs/release.md`](docs/release.md). Changes are recorded in
-[`CHANGELOG.md`](CHANGELOG.md), and sensitive reports follow
-[`SECURITY.md`](SECURITY.md).
+The explicit dataset writer is owner-bound and limits active partitions.
+Disordered input uses deterministic LRU eviction, so touching arbitrarily many
+partitions cannot retain arbitrarily many native writers:
 
-## Architecture
+```elixir
+{:ok, writer} = Parquex.Dataset.open_writer(dataset, max_open_partitions: 2)
+:ok = Parquex.Dataset.Writer.write(writer, first_batch)
+:ok = Parquex.Dataset.Writer.write(writer, next_batch)
+{:ok, report} = Parquex.Dataset.Writer.close(writer)
+```
 
-Public boundaries cover backend-neutral locations, schemas, bounded columnar
-batches, pull-based streams, explicit options, and stable errors. The decisions
-and native lifecycle rules are indexed in
-[`docs/architecture/README.md`](docs/architecture/README.md).
+## Exact time-range reads
 
-SQL/DataFusion, table formats, partition discovery, storage routing, and
-compaction orchestration are deliberately outside the initial scope.
+Dataset ranges are half-open: `[from, until)`. Opening a stream plans canonical
+partition names but performs no storage listing and opens no file. Demand lists
+one exact partition prefix at a time, traverses `.parquet` keys
+deterministically, and keeps at most one file reader active.
 
-## Development
+```elixir
+{:ok, stream} =
+  Parquex.Dataset.stream(dataset,
+    from: ~U[2026-08-03 10:00:00Z],
+    until: ~U[2026-08-03 13:00:00Z],
+    columns: [:space_id, :sequence, :payload],
+    where: {:gt, :sequence, 100},
+    batch_size: 1_024
+  )
 
-Elixir 1.20 and Rust 1.91.0 are currently pinned/tested. Run the authoritative
-quality gate from the repository root:
+Enum.each(stream, &consume_batch/1)
+```
+
+Partition pruning is followed by exact row filtering, so boundary and misplaced
+late rows outside the requested interval are never emitted. Projection retains
+predicate columns internally and removes them only after filtering.
+`Parquex.Dataset.read/2` uses the same plan but explicitly materializes all
+selected rows. Traversal order is deterministic by partition and key; it is not
+a promise of global event-time sorting.
+
+See [`docs/datasets.md`](docs/datasets.md) for writer bounds, reports, range
+statistics, and lifecycle behavior.
+
+## Memory and lifecycle contract
+
+Peak live memory is bounded by configured input batch, open partition,
+row-group/page, range, prefetch, S3 request, and multipart limits—not by total
+object or dataset size. A single variable-width cell still has to fit in its
+batch, and explicitly finite helpers necessarily materialize their input or
+output.
+
+Native writers/readers are monitored by their BEAM owner. Explicit cancel,
+early halt, consumer exceptions, producer exceptions, and owner exit release
+active native state. Dataset parts published before a later failure remain
+immutable; unpublished staging is removed.
+
+Parquex emits bounded-cardinality `:telemetry` measurements without locations,
+keys, credentials, schemas, column names, exception messages, or row contents.
+
+## Compatibility and non-goals
+
+The 0.1 `Parquex.Location`, `Parquex.Object`, `scan/2`, location-form `write/4`,
+and `append/4` APIs remain available. New code should prefer one reusable
+`Store` plus relative keys. [`docs/migration-0.2.md`](docs/migration-0.2.md)
+shows direct translations.
+
+SQL, DataFusion, joins, aggregations, table formats, catalogs, schema evolution,
+event sequencing, snapshot/materialization policy, compaction, virtual-shard
+ownership, and globally sorted multi-file results are deliberately outside the
+0.2 scope.
+
+## Installation and native targets
+
+```elixir
+def deps do
+  [
+    {:parquex, "~> 0.2.0"}
+  ]
+end
+```
+
+Official NIF 2.16 archives cover macOS ARM/Intel, Linux ARM/Intel with glibc or
+musl, and Windows Intel. Set `PARQUEX_BUILD=1` to force a source build. Source
+builds use the pinned Rust 1.91.0 toolchain.
+
+## Development and release
+
+Run the authoritative local gate:
 
 ```sh
 bin/qa_check.sh
 ```
 
-The gate starts or reuses the pinned project-owned RustFS Compose service,
-creates its test bucket, runs isolated `:rustfs_integration` coverage, and
-captures diagnostics on failure. It leaves the healthy service and volume
-running for fast repeated checks; use `docker compose down --volumes` when you
-want to remove them. Running `mix test` directly excludes those tests unless
-`PARQUEX_RUSTFS_INTEGRATION=1` is set.
+It starts or reuses the project-owned RustFS service and leaves the healthy
+container and volume running for fast subsequent checks. Direct `mix test`
+excludes RustFS tests unless `PARQUEX_RUSTFS_INTEGRATION=1` is set.
 
-GitHub Actions runs the same gate on Ubuntu with the project-owned RustFS
-service. Precompiled releases use one bounded seven-target matrix: macOS ARM
-and Intel, Linux ARM and x86_64 with glibc and musl, and Windows x86_64. All
-artifacts target NIF 2.16 and are directly loaded on a matching runner before
-publication.
-
-Maintainers publish precompiled NIFs explicitly after the version in `mix.exs`
-and `native/parquex_nif/Cargo.toml` is synchronized:
-
-```sh
-git push origin main
-gh workflow run precompiled-release.yml --ref main -f publish=true
-gh run watch "$(gh run list --workflow precompiled-release.yml --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
-mix rustler_precompiled.download Parquex.Native --all --print
-```
-
-Commit the generated `checksum-Elixir.Parquex.Native.exs` and wait for the CI
-precompiled-consumer jobs. Those jobs compile an unpacked downstream package
-with `cargo` and `rustc` replaced by failing shims, proving that consumers load
-the released binary rather than silently rebuilding it. Set `PARQUEX_BUILD=1`
-to force a source build when developing or diagnosing a platform issue.
-
-## Installation
-
-For the 0.1 release line, add Parquex to your dependencies:
-
-```elixir
-def deps do
-  [
-    {:parquex, "~> 0.1.0"}
-  ]
-end
-```
+Release and target details are in [`docs/release.md`](docs/release.md), changes
+in [`CHANGELOG.md`](CHANGELOG.md), architecture decisions in
+[`docs/architecture/README.md`](docs/architecture/README.md), and sensitive
+reports follow [`SECURITY.md`](SECURITY.md).

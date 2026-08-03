@@ -1,14 +1,15 @@
 defmodule Parquex.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/mindreframer/parquex"
 
   def project do
     [
       app: :parquex,
       version: @version,
-      description: "Bounded streaming Parquet for local and S3-compatible immutable objects",
+      description:
+        "Bounded Parquet objects and time-partitioned datasets for local and S3 storage",
       source_url: @source_url,
       homepage_url: @source_url,
       elixir: "~> 1.20",
@@ -23,7 +24,7 @@ defmodule Parquex.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:crypto, :logger]
     ]
   end
 
@@ -46,6 +47,9 @@ defmodule Parquex.MixProject do
         "SECURITY.md",
         "docs/parquet-reads.md",
         "docs/parquet-writes.md",
+        "docs/stores.md",
+        "docs/datasets.md",
+        "docs/migration-0.2.md",
         "docs/s3.md",
         "docs/append-filtering.md",
         "docs/telemetry.md",

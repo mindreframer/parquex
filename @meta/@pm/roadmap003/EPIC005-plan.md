@@ -5,7 +5,7 @@
 - [x] Phase 5.1: Add final replacement, lifecycle and memory hardening.
 - [x] Phase 5.2: Synchronize version and release metadata at `0.3.0`.
 - [x] Phase 5.3: Pass final local QA/docs/package gates and commit.
-- [ ] Phase 5.4: Push and publish all seven precompiled NIFs.
+- [x] Phase 5.4: Push and publish all seven precompiled NIFs.
 - [ ] Phase 5.5: Generate/commit checksums and pass clean-consumer CI.
 - [ ] Phase 5.6: Mark ROADMAP003 complete and pass final CI.
 
@@ -28,8 +28,8 @@
 - [x] Native resources return to baseline and RSS plateaus.
 - [x] Mix, Cargo and release metadata agree on `0.3.0`.
 - [x] Local QA, ExDoc and package audit pass.
-- [ ] Release workflow succeeds for all seven targets.
-- [ ] `v0.3.0` has exactly seven assets and matching checksums.
+- [x] Release workflow succeeds for all seven targets.
+- [x] `v0.3.0` has exactly seven assets and matching checksums.
 - [ ] Every clean consumer and RustFS logic job is green.
 - [ ] ROADMAP003 is completed only after all preceding checks.
 

@@ -1,7 +1,7 @@
 defmodule Parquex.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.4.0"
   @source_url "https://github.com/mindreframer/parquex"
   @authors ["Roman Heinrich <roman.heinrich@gmail.com>"]
 
@@ -52,6 +52,7 @@ defmodule Parquex.MixProject do
         "CHANGELOG.md",
         "SECURITY.md",
         "docs/stores.md",
+        "docs/zstd.md",
         "docs/parquet-files.md",
         "docs/datasets.md",
         "docs/telemetry.md",

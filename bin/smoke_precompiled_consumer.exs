@@ -1,4 +1,7 @@
-{:ok, %{api_version: 1}} = Parquex.native_status()
+{:ok, %{api_version: 2}} = Parquex.native_status()
+{:ok, compressed} = Parquex.Zstd.compress(["precompiled", "-zstd"], level: 3)
+{:ok, "precompiled-zstd"} =
+  Parquex.Zstd.decompress(compressed, max_output_size: 16)
 
 root = "parquex_precompiled_consumer_#{System.unique_integer([:positive, :monotonic])}"
 

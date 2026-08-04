@@ -3,7 +3,7 @@ defmodule ParquexTest do
   doctest Parquex
 
   test "crosses the native boundary" do
-    assert {:ok, %{api_version: 1}} = Parquex.native_status()
+    assert {:ok, %{api_version: 2}} = Parquex.native_status()
   end
 
   test "translates a native failure into a stable Elixir error" do

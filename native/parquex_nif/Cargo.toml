@@ -1,6 +1,6 @@
 [package]
 name = "parquex_nif"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 publish = false
 
@@ -23,3 +23,4 @@ object_store = { version = "=0.14.1", default-features = false, features = ["aws
 parquet = { version = "=59.1.0", default-features = false, features = ["arrow", "flate2-zlib-rs", "lz4", "snap", "zstd"] }
 rustler = "=0.38.0"
 tokio = { version = "=1.47.1", features = ["macros", "rt-multi-thread", "time"] }
+zstd = { version = "=0.13.3", default-features = false }

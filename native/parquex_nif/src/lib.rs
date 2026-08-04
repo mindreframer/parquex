@@ -11,6 +11,7 @@ mod s3;
 mod store;
 mod time_partition;
 mod writer;
+mod zstd;
 
 use error::NativeFailure;
 use object::{CancellationToken, FlushPolicy, ObjectMetadata, SyncPolicy};
@@ -94,6 +95,8 @@ pub(crate) mod atoms {
         parquet_writer_close,
         parquet_writer_abort,
         parquet_writer_stats,
+        zstd_compress,
+        zstd_decompress,
         standard,
         explicit,
         gt,
@@ -144,6 +147,8 @@ pub(crate) enum Operation {
     ParquetWriterClose,
     ParquetWriterAbort,
     ParquetWriterStats,
+    ZstdCompress,
+    ZstdDecompress,
     S3Head,
     S3List,
     S3Delete,
@@ -187,6 +192,8 @@ impl Operation {
             Self::ParquetWriterClose => atoms::parquet_writer_close(),
             Self::ParquetWriterAbort => atoms::parquet_writer_abort(),
             Self::ParquetWriterStats => atoms::parquet_writer_stats(),
+            Self::ZstdCompress => atoms::zstd_compress(),
+            Self::ZstdDecompress => atoms::zstd_decompress(),
             Self::S3Head => atoms::s3_head(),
             Self::S3List => atoms::s3_list(),
             Self::S3Delete => atoms::s3_delete(),
@@ -226,6 +233,26 @@ where
 {
     match guarded(operation, work) {
         Ok(value) => (atoms::ok(), value).encode(env),
+        Err(failure) => (atoms::error(), failure.payload()).encode(env),
+    }
+}
+
+fn encode_binary_guarded<'a, F>(env: Env<'a>, operation: Operation, work: F) -> Term<'a>
+where
+    F: FnOnce() -> Result<Vec<u8>, NativeFailure>,
+{
+    match guarded(operation, work) {
+        Ok(bytes) => match OwnedBinary::new(bytes.len()) {
+            Some(mut binary) => {
+                binary.as_mut_slice().copy_from_slice(&bytes);
+                (atoms::ok(), binary.release(env)).encode(env)
+            }
+            None => (
+                atoms::error(),
+                NativeFailure::expected(operation, "binary allocation failed").payload(),
+            )
+                .encode(env),
+        },
         Err(failure) => (atoms::error(), failure.payload()).encode(env),
     }
 }
@@ -334,7 +361,7 @@ fn write_policies(
 
 #[rustler::nif]
 fn smoke(env: Env<'_>) -> Term<'_> {
-    encode_guarded(env, Operation::Smoke, || Ok(1_u32))
+    encode_guarded(env, Operation::Smoke, || Ok(2_u32))
 }
 
 #[rustler::nif]
@@ -344,6 +371,20 @@ fn smoke_error(env: Env<'_>) -> Term<'_> {
             Operation::SmokeError,
             "native smoke error",
         ))
+    })
+}
+
+#[rustler::nif(schedule = "DirtyCpu")]
+fn zstd_compress<'a>(env: Env<'a>, data: Binary<'a>, level: i32) -> Term<'a> {
+    encode_binary_guarded(env, Operation::ZstdCompress, || {
+        zstd::compress(data.as_slice(), level)
+    })
+}
+
+#[rustler::nif(schedule = "DirtyCpu")]
+fn zstd_decompress<'a>(env: Env<'a>, data: Binary<'a>, max_output_size: usize) -> Term<'a> {
+    encode_binary_guarded(env, Operation::ZstdDecompress, || {
+        zstd::decompress(data.as_slice(), max_output_size)
     })
 }
 

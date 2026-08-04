@@ -35,6 +35,8 @@ load_path = String.trim_trailing(load_file, runtime_extension)
 nif_functions = [
   smoke: 0,
   smoke_error: 0,
+  zstd_compress: 2,
+  zstd_decompress: 2,
   store_open_local: 1,
   store_open_s3: 1,
   store_identity: 1,
@@ -86,5 +88,7 @@ definitions =
     Macro.Env.location(__ENV__)
   )
 
-{:ok, 1} = Parquex.Native.smoke()
+{:ok, 2} = Parquex.Native.smoke()
+{:ok, compressed} = Parquex.Native.zstd_compress("precompiled-zstd", 0)
+{:ok, "precompiled-zstd"} = Parquex.Native.zstd_decompress(compressed, 16)
 IO.puts("Raw precompiled NIF smoke passed: #{nif_file}")

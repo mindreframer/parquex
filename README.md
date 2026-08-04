@@ -16,12 +16,30 @@ Add Parquex to `mix.exs`:
 ```elixir
 def deps do
   [
-    {:parquex, "~> 0.3"}
+    {:parquex, "~> 0.4"}
   ]
 end
 ```
 
 Supported systems download a precompiled native library during dependency compilation.
+
+## Compress application payloads with Zstandard
+
+Parquex exposes the same native zstd implementation already included for
+Parquet compression:
+
+```elixir
+{:ok, compressed} = Parquex.Zstd.compress(["event:", payload], level: 7)
+
+{:ok, original} =
+  Parquex.Zstd.decompress(compressed,
+    max_output_size: 16 * 1024 * 1024
+  )
+```
+
+Decompression requires an application-selected output bound. See
+[Zstandard compression](docs/zstd.md) for framing, levels, errors, memory and
+scheduling behavior.
 
 ## Open a store
 

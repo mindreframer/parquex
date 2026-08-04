@@ -46,6 +46,9 @@ defmodule Parquex.Native do
   @spec smoke_error() :: {:error, map()}
   def smoke_error, do: :erlang.nif_error(:nif_not_loaded)
 
+  def zstd_compress(_data, _level), do: :erlang.nif_error(:nif_not_loaded)
+  def zstd_decompress(_data, _max_output_size), do: :erlang.nif_error(:nif_not_loaded)
+
   def store_open_local(_root), do: :erlang.nif_error(:nif_not_loaded)
   def store_open_s3(_config), do: :erlang.nif_error(:nif_not_loaded)
   def store_identity(_store), do: :erlang.nif_error(:nif_not_loaded)
